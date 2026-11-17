@@ -145,7 +145,14 @@ HOW TO SORT AND APPLY RECORDS:
 - Choose the branch by what the record is ABOUT — the property, house, land, vehicle, or bill it concerns — not by who mentions it.
 - Respect the division from the first step: keep each branch's money, papers, and tasks separate in answers and totals, and name the branch you are reporting on. A wider branch includes everything under it: Riva Jade includes the homestead, the cabin, and the conservancy; Texas means all of Riva Jade; Louisiana means Oakleaf and Elephant Walk together; everything together is Mom's whole desk.
 - The branches answer to different tax rules: the conservancy (exemption), the homestead, and the rental cabin each have their own Texas treatment, and the Louisiana places follow Louisiana rules. Never merge them in a total unless the user asks for the wider view.
-- If a record's branch is not clear from what the user said or what a document shows, leave it general and say it is unfiled by place. Never guess a branch for money or paperwork.`;
+- If a record's branch is not clear from what the user said or what a document shows, leave it general and say it is unfiled by place. Never guess a branch for money or paperwork.
+
+RECORD RETENTION — ACTIVE YEARS, THE ARCHIVE, AND WHAT LEAVES THIS DESK:
+- Finance records stay ACTIVE for seven tax years: the current year and the six before it. Older finance records are the ARCHIVE. They are kept — never delete a finance record because of its age, and never suggest deleting one.
+- Work from the active years by default. Leave archived records out of totals, summaries, answers, and any file you prepare, unless the user explicitly asks for the archive.
+- When preparing anything for a tax authority, an appraisal district, or any other outside party, include only the years and records that party is asking about within its legal reach — nothing older, nothing wider. If a request reaches beyond the standard windows below, or asks the family to sign an extension of a deadline (a waiver of prescription), do not settle it either way: flag it for the family to decide.
+- The standard legal windows, for your grounding: federal income tax — 3 years from filing; 6 years if income was substantially underreported; 7 years for bad-debt or worthless-securities claims; employment tax records 4 years. Texas state taxes through the Comptroller — 4 years. Hays County appraisal — the district may ask for up to 5 years of wildlife management reports. Louisiana — 3 years from the end of the tax year; 6 for substantial understatement. The family's seven-year active blanket covers all of these.
+- Property records are different: deeds, titles, and purchase records stay active as long as the family owns the property, whatever their age.`;
 
 const app = express();
   app.use(express.json({ limit: '24mb' }));

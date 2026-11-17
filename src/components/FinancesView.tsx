@@ -16,6 +16,8 @@ import {
   FinanceKind,
   PLACES,
   placeMatches,
+  getFinanceArchiveCutoff,
+  isArchivedFinanceEntry,
   ScannedDocument,
   getLocalTodayIso,
 } from '../types';
@@ -91,6 +93,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
 }) => {
   const [timeframe, setTimeframe] = useState<'month' | '90d' | 'year' | 'all'>('month');
   const [scopeFilter, setScopeFilter] = useState<string>('all');
+  const [includeArchive, setIncludeArchive] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<string>('ALL');
   const [groupViewMode, setGroupViewMode] = useState<'exact' | 'rollup'>('exact');
   const [searchQuery, setSearchQuery] = useState('');
@@ -141,11 +144,28 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     });
   }, [entries, timeframe, scopeFilter]);
 
+  // Retention: the working set is the active seven tax years. Archived
+  // entries join only when the user deliberately includes the archive.
+  const archiveCutoff = getFinanceArchiveCutoff(getLocalTodayIso());
+  const archivedCount = useMemo(
+    () =>
+      periodFiltered.filter((e) => isArchivedFinanceEntry(e.entryDate, getLocalTodayIso()))
+        .length,
+    [periodFiltered]
+  );
+  const activeFiltered = useMemo(
+    () =>
+      includeArchive
+        ? periodFiltered
+        : periodFiltered.filter((e) => !isArchivedFinanceEntry(e.entryDate, getLocalTodayIso())),
+    [periodFiltered, includeArchive]
+  );
+
   const summary = useMemo(() => {
     let totalExpenses = 0;
     let totalIncome = 0;
     let totalDeductible = 0;
-    for (const item of periodFiltered) {
+    for (const item of activeFiltered) {
       if (item.kind === 'income') {
         totalIncome += item.amount;
       } else {
@@ -159,11 +179,11 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
       netCashflow: totalIncome - totalExpenses,
       totalDeductible,
     };
-  }, [periodFiltered]);
+  }, [activeFiltered]);
 
   const groupBreakdown = useMemo(() => {
     const map = new Map<string, { name: string; total: number; count: number; deductible: number }>();
-    for (const item of periodFiltered) {
+    for (const item of activeFiltered) {
       if (item.kind !== 'expense') continue;
       const key =
         groupViewMode === 'rollup' ? getParentGroupName(item.group) : item.group;
@@ -174,11 +194,11 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
       map.set(key, existing);
     }
     return Array.from(map.values()).sort((a, b) => b.total - a.total);
-  }, [periodFiltered, groupViewMode]);
+  }, [activeFiltered, groupViewMode]);
 
   const visibleLedger = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return periodFiltered
+    return activeFiltered
       .filter((item) => {
         if (selectedGroup !== 'ALL') {
           const itemGroupKey =
@@ -192,7 +212,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
           .includes(q);
       })
       .sort((a, b) => b.entryDate.localeCompare(a.entryDate));
-  }, [periodFiltered, selectedGroup, groupViewMode, searchQuery, documents]);
+  }, [activeFiltered, selectedGroup, groupViewMode, searchQuery, documents]);
 
   function openNewModal(defaultGroup = 'Groceries') {
     setEditingEntry(null);
@@ -627,6 +647,23 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
               </h2>
             </div>
           </div>
+
+          {archivedCount > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 px-3 py-2">
+              <p className="text-xs text-slate-600 dark:text-slate-300">
+                Archive: {archivedCount} record{archivedCount === 1 ? '' : 's'} older than the
+                seven-year window (before Jan 1, {archiveCutoff.slice(0, 4)}). Kept for good —
+                just not counted in totals or exports unless you include them.
+              </p>
+              <button
+                type="button"
+                onClick={() => setIncludeArchive((v) => !v)}
+                className="min-h-[34px] px-3 text-xs font-medium text-teal-800 dark:text-teal-300 border border-teal-700/40 dark:border-teal-500/40 rounded-lg"
+              >
+                {includeArchive ? 'Leave the archive out' : 'Include the archive'}
+              </button>
+            </div>
+          )}
 
           {visibleLedger.length === 0 ? (
             <div className="py-12 text-center space-y-3">

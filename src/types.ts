@@ -69,6 +69,20 @@ export function placeMatches(recordPlace: string, filter: string): boolean {
   return (PLACE_CHILDREN[filter] || []).includes(recordPlace);
 }
 
+// The family's retention rule (Jason, 2026-11-17): finance records stay
+// ACTIVE for seven tax years — the current year and the six before it.
+// Older entries are the archive: kept forever, never deleted for age, but
+// outside ordinary totals, answers, and exports unless someone asks for
+// the archive by name.
+export function getFinanceArchiveCutoff(todayIso: string): string {
+  const year = Number(todayIso.slice(0, 4));
+  return `${year - 6}-01-01`;
+}
+
+export function isArchivedFinanceEntry(entryDate: string, todayIso: string): boolean {
+  return entryDate < getFinanceArchiveCutoff(todayIso);
+}
+
 export function isPlaceName(value: unknown): value is PlaceName {
   return typeof value === 'string' && (PLACES as readonly string[]).includes(value);
 }

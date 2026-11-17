@@ -54,6 +54,20 @@ the master copy of everything. Money entries can also be flagged **For
 Jason's care** — the expenses of looking after Jason at Oakleaf, kept
 tracked apart.
 
+## Retention — seven active years
+
+Finance records stay active for seven tax years — the current year and the
+six before it. Older entries become the archive: kept for good, never
+deleted for age, but out of the totals, lists, assistant answers, and CSV
+exports unless someone deliberately includes the archive from the ledger's
+archive bar. Backups keep everything — the archive is the family's own
+record, kept because it may be needed. For anything prepared for an
+outside party, the assistant includes only the years and records that
+party can properly ask about; a request reaching further, or asking the
+family to sign away a deadline, gets flagged for the family to decide.
+Deeds, titles, and purchase records stay active as long as the family
+owns the property.
+
 ## Documents: checked against the paper
 
 A scanned document starts out **provisional** — its words came from a

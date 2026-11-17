@@ -19,6 +19,7 @@ import {
   FinanceKind,
   PLACES,
   isPlaceName,
+  isArchivedFinanceEntry,
   PropertyCadence,
   PropertyEntry,
   PropertyEntryArea,
@@ -185,7 +186,10 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
       .join('\n');
 
     const groupTotals = new Map<string, { expenses: number; income: number; count: number }>();
-    for (const f of financeEntries) {
+    const activeFinances = financeEntries.filter(
+      (f) => !isArchivedFinanceEntry(f.entryDate, getLocalTodayIso())
+    );
+    for (const f of activeFinances) {
       const curr = groupTotals.get(f.group) || { expenses: 0, income: 0, count: 0 };
       if (f.kind === 'income') curr.income += f.amount;
       else curr.expenses += f.amount;
@@ -202,7 +206,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
       )
       .join('\n');
 
-    const recentFinances = financeEntries
+    const recentFinances = activeFinances
       .slice(0, 12)
       .map(
         (f) =>
