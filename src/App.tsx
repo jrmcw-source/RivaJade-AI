@@ -41,6 +41,7 @@ import {
   signInWithGoogle,
   signOutUser,
   subscribeDriveAccessToken,
+  getDriveAccessToken,
 } from './firebase';
 import {
   AppNotification,
@@ -73,7 +74,12 @@ import { WimberleyPropertyView } from './components/WimberleyPropertyView';
 import { FinancesView } from './components/FinancesView';
 import { GoogleDriveBackupModal } from './components/GoogleDriveBackupModal';
 import { AIAssistantDrawer } from './components/AIAssistantDrawer';
-import { WorkspaceBackupSnapshot } from './services/googleDriveBackup';
+import {
+  ensureStewardPhotosFolder,
+  listDriveBackups,
+  uploadDriveBinaryFile,
+  WorkspaceBackupSnapshot,
+} from './services/googleDriveBackup';
 import { PWAInstallModalTrigger } from './components/PWAInstallModal';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 
@@ -117,6 +123,7 @@ function withDocumentDefaults(
     verifiedByName: base.verifiedByName || '',
     verifiedAtIso: base.verifiedAtIso || '',
     paperLocation: base.paperLocation || '',
+    driveFileId: base.driveFileId || '',
   };
 }
 
@@ -937,11 +944,47 @@ function MainApp() {
       | 'verifiedByName'
       | 'verifiedAtIso'
       | 'paperLocation'
+      | 'driveFileId'
     > & { paperLocation?: string }
   ): Promise<string> {
     if (!user) return '';
     const id = createSafeId('doc');
     const stamp = householdStamp();
+    // The photo's permanent home is Google Drive: copy it there now and
+    // remember the Drive file id on the record. If Drive is not connected
+    // or the copy fails, the document still saves — the Drive Backups
+    // screen can make the Drive copy later and link it then.
+    let driveFileId = '';
+    if (payload.imageUrl && payload.imageUrl.startsWith('/api/uploads/')) {
+      try {
+        const token = getDriveAccessToken();
+        if (token) {
+          const fileName = payload.imageUrl.split('/').pop() || '';
+          if (fileName) {
+            const photosFolderId = await ensureStewardPhotosFolder(token);
+            const existing = await listDriveBackups(token, photosFolderId);
+            const found = existing.find((f) => f.name === fileName);
+            if (found) {
+              driveFileId = found.id;
+            } else {
+              const photoRes = await fetch(payload.imageUrl);
+              if (photoRes.ok) {
+                const blob = await photoRes.blob();
+                const uploaded = await uploadDriveBinaryFile(token, {
+                  folderId: photosFolderId,
+                  name: fileName,
+                  mimeType: blob.type || 'image/jpeg',
+                  blob,
+                });
+                driveFileId = uploaded.id;
+              }
+            }
+          }
+        }
+      } catch {
+        driveFileId = '';
+      }
+    }
     try {
       await setDoc(doc(db, 'documents', id), {
         userId: user.uid,
@@ -961,6 +1004,7 @@ function MainApp() {
         verifiedByName: '',
         verifiedAtIso: '',
         paperLocation: (payload.paperLocation || '').slice(0, 200),
+        driveFileId,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
@@ -991,6 +1035,8 @@ function MainApp() {
         clean.verifiedAtIso = updates.verifiedAtIso.slice(0, 40);
       if (updates.paperLocation !== undefined)
         clean.paperLocation = updates.paperLocation.slice(0, 200);
+      if (updates.driveFileId !== undefined)
+        clean.driveFileId = updates.driveFileId.slice(0, 128);
       const existingDoc = documents.find((r) => r.id === docId);
       if (existingDoc) {
         clean.householdId = existingDoc.householdId || '';
@@ -1006,6 +1052,8 @@ function MainApp() {
           clean.verifiedAtIso = existingDoc.verifiedAtIso || '';
         if (clean.paperLocation === undefined)
           clean.paperLocation = existingDoc.paperLocation || '';
+        if (clean.driveFileId === undefined)
+          clean.driveFileId = existingDoc.driveFileId || '';
       }
 
       await updateDoc(doc(db, 'documents', docId), clean);
@@ -1610,6 +1658,48 @@ function MainApp() {
       setHouseholdFeedback(`You joined "${household.name}".`);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `households/${household.householdId}`);
+    }
+  }
+
+  async function handleLinkDocumentDrivePhoto(docId: string, driveFileId: string) {
+    const existingDoc = documents.find((r) => r.id === docId);
+    if (!existingDoc) return;
+    try {
+      await updateDoc(doc(db, 'documents', docId), {
+        driveFileId: driveFileId.slice(0, 128),
+        householdId: existingDoc.householdId || '',
+        memberIds:
+          existingDoc.memberIds && existingDoc.memberIds.length > 0
+            ? existingDoc.memberIds
+            : [existingDoc.userId],
+        verificationStatus: existingDoc.verificationStatus || 'provisional',
+        verifiedByName: existingDoc.verifiedByName || '',
+        verifiedAtIso: existingDoc.verifiedAtIso || '',
+        paperLocation: existingDoc.paperLocation || '',
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `documents/${docId}`);
+    }
+  }
+
+  async function handleGenerateCalendarToken() {
+    if (!user || !activeHousehold) return;
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    const token = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    try {
+      await updateDoc(doc(db, 'households', activeHousehold.householdId), {
+        calendarToken: token,
+        updatedAt: serverTimestamp(),
+      });
+      setHouseholdFeedback(
+        activeHousehold.calendarToken
+          ? 'New subscription link created. The old link no longer works.'
+          : "Subscription link created. Calendar apps that have it will keep this household's dates up to date on their own."
+      );
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `households/${activeHousehold.householdId}`);
     }
   }
 
@@ -2340,6 +2430,57 @@ function MainApp() {
                       household. Turn this off when something should stay private to you.
                     </span>
                   </label>
+                  <div className="space-y-1.5 pt-1">
+                    <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                      Calendar subscription link
+                    </p>
+                    {activeHousehold.calendarToken ? (
+                      <>
+                        <input
+                          type="text"
+                          readOnly
+                          value={`${window.location.origin}/api/calendar/${activeHousehold.householdId}/${activeHousehold.calendarToken}`}
+                          onFocus={(e) => e.target.select()}
+                          className="w-full min-h-[42px] px-3 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                        />
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          In your calendar app, choose Subscribe or Add calendar by URL and
+                          paste this link. The calendar then keeps itself up to date with
+                          this household's open tasks and appointments. Anyone who has the
+                          link can see them, so treat it like a key.
+                        </p>
+                        {activeHousehold.ownerId === user.uid && (
+                          <button
+                            type="button"
+                            onClick={handleGenerateCalendarToken}
+                            className="min-h-[36px] px-3 text-xs font-medium text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 hover:bg-teal-50 dark:hover:bg-teal-950/40 rounded-lg"
+                          >
+                            Make a new link (the old one stops working)
+                          </button>
+                        )}
+                      </>
+                    ) : activeHousehold.ownerId === user.uid ? (
+                      <>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          Create a link your calendar apps can subscribe to, so this
+                          household's dates appear in the calendar you already use and
+                          stay up to date on their own.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={handleGenerateCalendarToken}
+                          className="min-h-[36px] px-3 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-lg"
+                        >
+                          Create subscription link
+                        </button>
+                      </>
+                    ) : (
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        The household owner can create a subscription link here, so
+                        everyone's calendar apps can follow this household's dates.
+                      </p>
+                    )}
+                  </div>
                   {activeHousehold.ownerId === user.uid && (
                     <form onSubmit={handleInviteToHousehold} className="space-y-2">
                       <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
@@ -2522,6 +2663,7 @@ function MainApp() {
         financeEntries={financeEntries}
         voiceMemories={voiceMemories}
         onRestoreSnapshot={handleRestoreSnapshot}
+        onLinkDocumentPhoto={handleLinkDocumentDrivePhoto}
       />
 
       {/* Cross-App AI Assistant Slide-Over Drawer */}

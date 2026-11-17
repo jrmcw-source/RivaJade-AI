@@ -14,6 +14,10 @@ their own phone or computer.
   their own home's desk — and switch between them in Settings or the sidebar.
   Each household is private from the others: only its own members can see its
   records. Creating or joining a household lands you on it.
+- Each household can have a **calendar subscription link** (Settings → Family
+  Household, created by the owner): calendar apps subscribe to it and keep
+  the household's open tasks and appointments up to date on their own. The
+  owner can replace the link at any time, which invalidates the old one.
 - Tasks, documents, property entries, and money records made while sharing is
   on are stamped with the household's member list: every member sees them,
   files them, and keeps them current. Voice memories stay private to the
@@ -40,14 +44,32 @@ signed-in user's Google Drive (the app only ever touches files it created):
 
 - Full workspace snapshot (.json) — every record, ready to restore.
 - Finances ledger (.csv), Wimberley report (.md), OCR vault archive (.md).
-- **Document Photos** — copies the scanned page photos themselves into
-  "Steward Backups / Document Photos", so the pictures live in Drive too.
+- **Document Photos** — when a document is saved, its scanned photo is copied
+  to a "Steward Document Photos" folder in Drive and linked to the record.
+  That folder is the photos' permanent home: if the app server's copy is
+  ever lost, the vault shows the Drive copy instead, and **Restore Photos
+  from Drive** (in this same screen) writes any missing photos back to the
+  server. The backup screen's Document Photos action brings older documents'
+  photos home and links them the same way.
 
-## Calendar file
+## Calendar file — and the live feed
 
 Schedule → **Calendar File** downloads a standard .ics file of open tasks and
 appointments. Import it into Apple Calendar, Google Calendar, or Outlook to
 see the desk's dates in the calendar you already use.
+
+For dates that keep themselves current, use the household's **subscription
+link** instead (Settings → Family Household): the server answers
+`/api/calendar/<householdId>/<token>` with a live .ics feed of that
+household's open tasks, and calendar apps poll it on their own schedule.
+
+**Turning the feed on:** the feed reads Firestore from the server, so the
+server needs credentials. On Google Cloud Run that is usually the runtime's
+own service account and it simply works. If the feed answers "not
+configured," create a service-account key in the Firebase console (Project
+settings → Service accounts → Generate new private key) and set it as the
+`FIREBASE_SERVICE_ACCOUNT_JSON` environment variable where the app runs,
+then restart the app.
 
 ## Running it
 
@@ -64,10 +86,11 @@ see the desk's dates in the calendar you already use.
 - `security_spec.md` lists the invariants; `firestore.rules.test.ts` is the
   adversarial payload catalog those rules must deny.
 - Scanned page photos are stored by the app server under `/api/uploads/`
-  (see `server.ts`). The Drive photo backup above is the second copy.
+  (see `server.ts`), with their permanent home in Drive as described above.
 
-## Known next steps (deployment stage)
+## Known next steps
 
-- A live calendar subscription feed (needs server-side Firestore credentials).
-- A permanent home for page photos (Firebase Storage or Drive) in place of
-  the app server's disk, and restoring photos from a Drive backup.
+- None outstanding from the original list: household sharing, document
+  checking against the paper, the Drive photo home with restore, and the
+  live calendar feed are all built. The feed's one operational step —
+  server credentials — is covered under "Turning the feed on" above.

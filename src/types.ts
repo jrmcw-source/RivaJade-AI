@@ -74,6 +74,7 @@ export interface ScannedDocument {
   verifiedByName: string;
   verifiedAtIso: string;
   paperLocation: string;
+  driveFileId: string;
   createdAt?: unknown;
   updatedAt?: unknown;
 }
@@ -142,6 +143,7 @@ export interface Household {
   ownerName: string;
   memberIds: string[];
   invitedEmails: string[];
+  calendarToken?: string;
   createdAt?: unknown;
   updatedAt?: unknown;
 }

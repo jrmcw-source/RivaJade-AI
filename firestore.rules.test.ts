@@ -139,4 +139,20 @@ export const DIRTY_DOZEN_PAYLOADS = [
     data: { userId: 'u1', verificationStatus: 'verified', verifiedAtIso: '' },
     expected: 'PERMISSION_DENIED',
   },
+  {
+    name: '18. Household with an oversized calendar token',
+    auth: { uid: 'u1', token: { email_verified: true } },
+    operation: 'create',
+    path: '/households/hh_token',
+    data: { userId: 'u1', calendarToken: 'x'.repeat(65) },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '19. Document with a non-string driveFileId',
+    auth: { uid: 'u1', token: { email_verified: true } },
+    operation: 'create',
+    path: '/documents/d_bad_drive_id',
+    data: { userId: 'u1', driveFileId: 12345 },
+    expected: 'PERMISSION_DENIED',
+  },
 ];

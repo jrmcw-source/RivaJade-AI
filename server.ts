@@ -16,6 +16,8 @@ import {
   LiveServerMessage,
   FunctionDeclaration,
 } from '@google/genai';
+import { buildIcsCalendar } from './src/services/calendarExport';
+import type { ScheduleTask } from './src/types';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,6 +28,62 @@ const UPLOADS_DIR = path.resolve(__dirname, 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
+
+// ---------------------------------------------------------------------------
+// Household calendar subscription feed — server-side Firestore access.
+//
+// The feed reads Firestore with server credentials: the
+// FIREBASE_SERVICE_ACCOUNT_JSON environment variable when set, otherwise the
+// runtime's own identity (Application Default Credentials — for example the
+// Cloud Run service account the app runs as). The Admin SDK is imported
+// lazily, so a missing package or missing credentials can never stop the app
+// itself from starting; the feed simply reports that it is not configured.
+// ---------------------------------------------------------------------------
+type AdminDb = import('firebase-admin/firestore').Firestore;
+let adminDbPromise: Promise<AdminDb | null> | null = null;
+
+function getAdminDb(): Promise<AdminDb | null> {
+  if (!adminDbPromise) {
+    adminDbPromise = (async () => {
+      try {
+        const { initializeApp, applicationDefault, cert, getApps } =
+          await import('firebase-admin/app');
+        const { getFirestore } = await import('firebase-admin/firestore');
+        let projectId: string | undefined;
+        let databaseId: string | undefined;
+        try {
+          const cfg = JSON.parse(
+            fs.readFileSync(path.resolve(__dirname, 'firebase-applet-config.json'), 'utf8')
+          ) as { projectId?: string; firestoreDatabaseId?: string };
+          projectId = cfg.projectId;
+          databaseId = cfg.firestoreDatabaseId;
+        } catch {
+          // The config file only pins the project/database; ADC can go without.
+        }
+        let app: import('firebase-admin/app').App;
+        if (getApps().length > 0) {
+          app = getApps()[0];
+        } else if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+          const key = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON) as {
+            project_id?: string;
+          };
+          app = initializeApp({
+            credential: cert(key as Record<string, unknown>),
+            projectId: projectId || key.project_id,
+          });
+        } else {
+          app = initializeApp({ credential: applicationDefault(), projectId });
+        }
+        return databaseId ? getFirestore(app, databaseId) : getFirestore(app);
+      } catch (err) {
+        console.error('Calendar feed: Firebase Admin is not available on this server.', err);
+        return null;
+      }
+    })();
+  }
+  return adminDbPromise;
+}
+
 
 const CATEGORIES = [
   'Tax & Finance',
@@ -326,6 +384,98 @@ async function createApp() {
   // ---------------------------------------------------------------------------
   // 2. Task Help Suggestions Endpoint
   // ---------------------------------------------------------------------------
+  // Household calendar subscription feed. Calendar apps poll this URL; the
+  // per-household token in the path is the only credential, and the owner
+  // can regenerate it in Settings, which invalidates every older link.
+  app.get('/api/calendar/:householdId/:token', async (req, res) => {
+    const { householdId, token } = req.params;
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(householdId) || !/^[A-Za-z0-9_-]{1,64}$/.test(token)) {
+      res.status(400).type('text/plain').send('Invalid calendar link.');
+      return;
+    }
+    const db = await getAdminDb();
+    if (!db) {
+      res
+        .status(503)
+        .type('text/plain')
+        .send('The calendar subscription feed is not configured on this server yet.');
+      return;
+    }
+    try {
+      const hhSnap = await db.doc(`households/${householdId}`).get();
+      if (!hhSnap.exists) {
+        res.status(404).type('text/plain').send('Calendar not found.');
+        return;
+      }
+      const hh = hhSnap.data() as { name?: string; calendarToken?: string };
+      if (!hh.calendarToken || hh.calendarToken !== token) {
+        res.status(404).type('text/plain').send('Calendar not found.');
+        return;
+      }
+      const tasksSnap = await db
+        .collection('tasks')
+        .where('householdId', '==', householdId)
+        .get();
+      const feedTasks = tasksSnap.docs.map((d) => {
+        const data = d.data() as Record<string, unknown>;
+        return {
+          id: d.id,
+          title: typeof data.title === 'string' ? data.title : 'Untitled',
+          status: typeof data.status === 'string' ? data.status : '',
+          dueDate: typeof data.dueDate === 'string' ? data.dueDate : '',
+          dueTime: typeof data.dueTime === 'string' ? data.dueTime : '',
+          estimatedMinutes:
+            typeof data.estimatedMinutes === 'number' ? data.estimatedMinutes : 30,
+          category: typeof data.category === 'string' ? data.category : '',
+          notes: typeof data.notes === 'string' ? data.notes : '',
+        };
+      });
+      const ics = buildIcsCalendar(
+        feedTasks as unknown as ScheduleTask[],
+        hh.name ? `${hh.name} — Steward` : 'Steward Household Calendar'
+      );
+      res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.send(ics);
+    } catch (err) {
+      console.error('Calendar feed failed:', err);
+      res
+        .status(503)
+        .type('text/plain')
+        .send('The calendar subscription feed is not configured on this server yet.');
+    }
+  });
+
+  // Restore a document photo from its Google Drive home copy. The client
+  // sends the photo's stored filename plus its bytes; the file lands back in
+  // the uploads folder under the same name, so the document's existing
+  // imageUrl serves it again.
+  app.post('/api/documents/restore-photo', (req, res) => {
+    const { fileName, imageBase64 } = req.body as {
+      fileName?: string;
+      imageBase64?: string;
+    };
+    const safeName = path.basename(fileName || '');
+    if (!/^[a-zA-Z0-9_\-\.]+$/.test(safeName) || !/\.(jpg|jpeg|png|webp)$/i.test(safeName)) {
+      res.status(400).json({ error: 'Invalid file name for photo restore.' });
+      return;
+    }
+    if (!imageBase64 || typeof imageBase64 !== 'string') {
+      res.status(400).json({ error: 'Missing imageBase64 payload for photo restore.' });
+      return;
+    }
+    const cleanBase64 = imageBase64.includes(',')
+      ? imageBase64.split(',')[1]
+      : imageBase64;
+    const buffer = Buffer.from(cleanBase64, 'base64');
+    if (buffer.length === 0 || buffer.length > 16 * 1024 * 1024) {
+      res.status(400).json({ error: 'Photo payload is empty or too large.' });
+      return;
+    }
+    fs.writeFileSync(path.join(UPLOADS_DIR, safeName), buffer);
+    res.json({ ok: true, imageUrl: `/api/uploads/${safeName}` });
+  });
+
   app.post('/api/tasks/suggest-help', async (req, res) => {
     try {
       const { title, category, type, dueDate, notes, linkedDocumentSummary, linkedDocumentOcr } =

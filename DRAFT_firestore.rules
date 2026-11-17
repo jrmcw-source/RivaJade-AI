@@ -295,6 +295,7 @@ service cloud.firestore {
           'verificationStatus',
           'verifiedByName',
           'verifiedAtIso',
+          'driveFileId',
           'paperLocation',
           'createdAt',
           'updatedAt'
@@ -332,6 +333,8 @@ service cloud.firestore {
         && (data.verificationStatus == 'provisional' || data.verifiedAtIso.size() > 0)
         && data.paperLocation is string
         && data.paperLocation.size() <= 200
+        && data.get('driveFileId', '') is string
+        && data.get('driveFileId', '').size() <= 128
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -752,6 +755,7 @@ service cloud.firestore {
           'ownerName',
           'memberIds',
           'invitedEmails',
+          'calendarToken',
           'createdAt',
           'updatedAt'
         ])
@@ -766,6 +770,8 @@ service cloud.firestore {
         && data.memberIds.size() >= 1
         && data.ownerId in data.memberIds
         && isBoundedStringList(data.invitedEmails, 25, 254)
+        && data.get('calendarToken', '') is string
+        && data.get('calendarToken', '').size() <= 64
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -978,6 +984,7 @@ service cloud.firestore {
           'verificationStatus',
           'verifiedByName',
           'verifiedAtIso',
+          'driveFileId',
           'paperLocation',
           'householdId',
           'memberIds',
@@ -1177,7 +1184,7 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && (
           (existing().ownerId == request.auth.uid
-            && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'memberIds', 'invitedEmails', 'updatedAt']))
+            && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'memberIds', 'invitedEmails', 'calendarToken', 'updatedAt']))
           ||
           (request.auth.token.email.lower() in existing().invitedEmails
             && !(request.auth.uid in existing().memberIds)

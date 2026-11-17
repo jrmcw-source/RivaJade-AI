@@ -379,3 +379,57 @@ export async function uploadDriveBinaryFile(
   }
   return (await res.json()) as DriveBackupFile;
 }
+
+const PHOTOS_FOLDER_NAME = 'Steward Document Photos';
+
+export async function ensureStewardPhotosFolder(accessToken: string): Promise<string> {
+  const query = encodeURIComponent(
+    `name = '${PHOTOS_FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`
+  );
+  const searchRes = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name)&spaces=drive`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }
+  );
+  if (!searchRes.ok) {
+    throw new Error(await parseDriveError(searchRes, 'Unable to search Google Drive folders'));
+  }
+  const searchJson = (await searchRes.json()) as { files?: Array<{ id: string; name: string }> };
+  if (searchJson.files && searchJson.files.length > 0) {
+    return searchJson.files[0].id;
+  }
+
+  const createRes = await fetch('https://www.googleapis.com/drive/v3/files?fields=id,name', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name: PHOTOS_FOLDER_NAME,
+      mimeType: 'application/vnd.google-apps.folder',
+    }),
+  });
+  if (!createRes.ok) {
+    throw new Error(await parseDriveError(createRes, 'Unable to create Steward Document Photos folder'));
+  }
+  const created = (await createRes.json()) as { id: string };
+  return created.id;
+}
+
+export async function downloadDriveFileBlob(
+  accessToken: string,
+  fileId: string
+): Promise<Blob> {
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }
+  );
+  if (!res.ok) {
+    throw new Error(await parseDriveError(res, 'Failed to download file from Google Drive'));
+  }
+  return res.blob();
+}

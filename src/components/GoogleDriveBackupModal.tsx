@@ -34,11 +34,23 @@ import {
   deleteDriveBackupFile,
   downloadDriveBackupContent,
   ensureStewardBackupFolder,
-  ensureStewardSubfolder,
   uploadDriveBinaryFile,
   listDriveBackups,
   overwriteDriveBackupFile,
+  ensureStewardPhotosFolder,
+  downloadDriveFileBlob,
 } from '../services/googleDriveBackup';
+
+async function blobToBase64(blob: Blob): Promise<string> {
+  const buf = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
 
 interface GoogleDriveBackupModalProps {
   open: boolean;
@@ -49,6 +61,7 @@ interface GoogleDriveBackupModalProps {
   financeEntries: FinanceEntry[];
   voiceMemories: VoiceMemory[];
   onRestoreSnapshot: (snapshot: WorkspaceBackupSnapshot) => Promise<{ importedCount: number }>;
+  onLinkDocumentPhoto?: (docId: string, driveFileId: string) => Promise<void>;
 }
 
 type BackupKind = 'workspace_json' | 'finances_csv' | 'wimberley_md' | 'ocr_md';
@@ -87,6 +100,7 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
   financeEntries,
   voiceMemories,
   onRestoreSnapshot,
+  onLinkDocumentPhoto,
 }) => {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
@@ -226,16 +240,15 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
     setErrorMsg(null);
     setSuccessMsg(null);
     try {
-      const fId = folderId || (await ensureStewardBackupFolder(accessToken));
-      setFolderId(fId);
-      const photosFolderId = await ensureStewardSubfolder(accessToken, fId, 'Document Photos');
+      const photosFolderId = await ensureStewardPhotosFolder(accessToken);
       const existing = await listDriveBackups(accessToken, photosFolderId);
-      const existingNames = new Set(existing.map((f) => f.name));
+      const existingByName = new Map(existing.map((f) => [f.name, f.id]));
       const withPhotos = documents.filter(
         (d) => d.imageUrl && d.imageUrl.startsWith('/api/uploads/')
       );
       let uploaded = 0;
       let skipped = 0;
+      let linked = 0;
       let failed = 0;
       for (const d of withPhotos) {
         const fileName = d.imageUrl.split('/').pop() || '';
@@ -243,29 +256,35 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
           failed += 1;
           continue;
         }
-        if (existingNames.has(fileName)) {
-          skipped += 1;
-          continue;
-        }
         try {
-          const res = await fetch(d.imageUrl);
-          if (!res.ok) throw new Error('photo fetch failed');
-          const blob = await res.blob();
-          await uploadDriveBinaryFile(accessToken, {
-            folderId: photosFolderId,
-            name: fileName,
-            mimeType: blob.type || 'image/jpeg',
-            blob,
-          });
-          uploaded += 1;
+          let driveId = existingByName.get(fileName) || '';
+          if (driveId) {
+            skipped += 1;
+          } else {
+            const res = await fetch(d.imageUrl);
+            if (!res.ok) throw new Error('photo fetch failed');
+            const blob = await res.blob();
+            const created = await uploadDriveBinaryFile(accessToken, {
+              folderId: photosFolderId,
+              name: fileName,
+              mimeType: blob.type || 'image/jpeg',
+              blob,
+            });
+            driveId = created.id;
+            uploaded += 1;
+          }
+          if (driveId && !d.driveFileId && onLinkDocumentPhoto) {
+            await onLinkDocumentPhoto(d.id, driveId);
+            linked += 1;
+          }
         } catch {
           failed += 1;
         }
       }
       setSuccessMsg(
-        `Document photos backed up to "Steward Backups / Document Photos": ${uploaded} new, ${skipped} already there${
-          failed > 0 ? `, ${failed} could not be read` : ''
-        }.`
+        `Document photos are in "Steward Document Photos" in Drive: ${uploaded} new, ${skipped} already there${
+          linked > 0 ? `, ${linked} linked to their records` : ''
+        }${failed > 0 ? `, ${failed} could not be read` : ''}.`
       );
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Document photo backup failed.');
@@ -274,6 +293,60 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
     }
   }
 
+  async function handleRestorePhotos() {
+    if (!accessToken) return;
+    setBusyAction('restore-photos');
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    try {
+      const withDrive = documents.filter(
+        (d) => d.driveFileId && d.imageUrl && d.imageUrl.startsWith('/api/uploads/')
+      );
+      let restored = 0;
+      let alreadyThere = 0;
+      let failed = 0;
+      for (const d of withDrive) {
+        const fileName = d.imageUrl.split('/').pop() || '';
+        if (!fileName) {
+          failed += 1;
+          continue;
+        }
+        let missing = false;
+        try {
+          const check = await fetch(d.imageUrl, { method: 'HEAD' });
+          missing = !check.ok;
+        } catch {
+          missing = true;
+        }
+        if (!missing) {
+          alreadyThere += 1;
+          continue;
+        }
+        try {
+          const blob = await downloadDriveFileBlob(accessToken, d.driveFileId);
+          const imageBase64 = await blobToBase64(blob);
+          const res = await fetch('/api/documents/restore-photo', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fileName, imageBase64 }),
+          });
+          if (!res.ok) throw new Error('restore failed');
+          restored += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      setSuccessMsg(
+        `Photo restore: ${restored} brought back from Drive, ${alreadyThere} already in place${
+          failed > 0 ? `, ${failed} could not be restored` : ''
+        }.`
+      );
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Photo restore failed.');
+    } finally {
+      setBusyAction(null);
+    }
+  }
   async function handlePrepareRestore(file: DriveBackupFile) {
     if (!accessToken) return;
     setBusyAction(`restore_prep_${file.id}`);
@@ -495,11 +568,30 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
                         documents.filter((d) => d.imageUrl && d.imageUrl.startsWith('/api/uploads/'))
                           .length
                       }{' '}
-                      scanned photos, copied to "Steward Backups / Document Photos" so the paper
-                      pictures live in Drive too
+                      scanned photos, kept in "Steward Document Photos" in Drive — their
+                      permanent home, so a lost server copy can be restored
                     </p>
                   </div>
                   <UploadCloud className="w-4 h-4 shrink-0 text-teal-700 dark:text-teal-400" />
+                </button>
+
+
+                <button
+                  type="button"
+                  disabled={busyAction !== null}
+                  onClick={() => handleRestorePhotos()}
+                  className="w-full min-h-[44px] flex items-center justify-between gap-2 px-3.5 py-2.5 text-left text-xs font-medium bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-xl transition-colors disabled:opacity-60"
+                >
+                  <div>
+                    <p className="font-semibold">
+                      {busyAction === 'restore-photos' ? 'Restoring photos from Drive...' : 'Restore Photos from Drive'}
+                    </p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {documents.filter((d) => d.driveFileId).length} photos have a Drive home
+                      copy — any whose server copy is missing are brought back from Drive
+                    </p>
+                  </div>
+                  <DownloadCloud className="w-4 h-4 shrink-0 text-teal-700 dark:text-teal-400" />
                 </button>
 
             {/* Saved Backups List */}

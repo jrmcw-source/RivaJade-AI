@@ -31,7 +31,12 @@
         },
         "preferredFocusWindow": {
           "type": "string",
-          "enum": ["morning", "afternoon", "evening", "balanced"]
+          "enum": [
+            "morning",
+            "afternoon",
+            "evening",
+            "balanced"
+          ]
         },
         "prefersQuickWinsFirst": {
           "type": "boolean"
@@ -87,7 +92,12 @@
           "format": "date-time"
         }
       },
-      "required": ["userId", "email", "createdAt", "updatedAt"]
+      "required": [
+        "userId",
+        "email",
+        "createdAt",
+        "updatedAt"
+      ]
     },
     "UserHandle": {
       "title": "UserHandle",
@@ -121,7 +131,14 @@
           "format": "date-time"
         }
       },
-      "required": ["userId", "username", "displayName", "photoURL", "createdAt", "updatedAt"]
+      "required": [
+        "userId",
+        "username",
+        "displayName",
+        "photoURL",
+        "createdAt",
+        "updatedAt"
+      ]
     },
     "ScheduleTask": {
       "title": "ScheduleTask",
@@ -148,7 +165,10 @@
         },
         "type": {
           "type": "string",
-          "enum": ["task", "appointment"]
+          "enum": [
+            "task",
+            "appointment"
+          ]
         },
         "category": {
           "type": "string",
@@ -182,11 +202,18 @@
         },
         "status": {
           "type": "string",
-          "enum": ["pending", "completed"]
+          "enum": [
+            "pending",
+            "completed"
+          ]
         },
         "priority": {
           "type": "string",
-          "enum": ["low", "medium", "high"]
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
         },
         "notes": {
           "type": "string",
@@ -306,7 +333,10 @@
         },
         "verificationStatus": {
           "type": "string",
-          "enum": ["provisional", "verified"],
+          "enum": [
+            "provisional",
+            "verified"
+          ],
           "description": "Trust state: a scan is provisional until a person checks it against the physical paper"
         },
         "verifiedByName": {
@@ -329,6 +359,10 @@
         "updatedAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "driveFileId": {
+          "type": "string",
+          "maxLength": 128
         }
       },
       "required": [
@@ -502,7 +536,10 @@
         },
         "role": {
           "type": "string",
-          "enum": ["owner", "member"]
+          "enum": [
+            "owner",
+            "member"
+          ]
         },
         "participantIds": {
           "type": "array",
@@ -572,11 +609,18 @@
         },
         "priority": {
           "type": "string",
-          "enum": ["low", "medium", "high"]
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
         },
         "status": {
           "type": "string",
-          "enum": ["pending", "completed"]
+          "enum": [
+            "pending",
+            "completed"
+          ]
         },
         "notes": {
           "type": "string",
@@ -659,7 +703,11 @@
         },
         "status": {
           "type": "string",
-          "enum": ["pending", "accepted", "declined"]
+          "enum": [
+            "pending",
+            "accepted",
+            "declined"
+          ]
         },
         "createdAt": {
           "type": "string",
@@ -704,7 +752,12 @@
         },
         "type": {
           "type": "string",
-          "enum": ["task_assigned", "task_completed", "project_invite", "invite_accepted"]
+          "enum": [
+            "task_assigned",
+            "task_completed",
+            "project_invite",
+            "invite_accepted"
+          ]
         },
         "projectId": {
           "type": "string",
@@ -769,7 +822,11 @@
         },
         "area": {
           "type": "string",
-          "enum": ["conservancy", "cabin_maintenance", "cabin_stay"]
+          "enum": [
+            "conservancy",
+            "cabin_maintenance",
+            "cabin_stay"
+          ]
         },
         "title": {
           "type": "string",
@@ -778,7 +835,14 @@
         },
         "status": {
           "type": "string",
-          "enum": ["nominal", "attention", "urgent", "upcoming", "ready", "completed"]
+          "enum": [
+            "nominal",
+            "attention",
+            "urgent",
+            "upcoming",
+            "ready",
+            "completed"
+          ]
         },
         "scheduledDate": {
           "type": "string",
@@ -791,7 +855,13 @@
         },
         "cadence": {
           "type": "string",
-          "enum": ["once", "monthly", "quarterly", "seasonal", "annual"]
+          "enum": [
+            "once",
+            "monthly",
+            "quarterly",
+            "seasonal",
+            "annual"
+          ]
         },
         "inspectorOrGuest": {
           "type": "string",
@@ -851,7 +921,10 @@
         },
         "kind": {
           "type": "string",
-          "enum": ["expense", "income"]
+          "enum": [
+            "expense",
+            "income"
+          ]
         },
         "group": {
           "type": "string",
@@ -877,7 +950,12 @@
         },
         "propertyScope": {
           "type": "string",
-          "enum": ["general", "home", "wimberley_conservancy", "wimberley_cabin"]
+          "enum": [
+            "general",
+            "home",
+            "wimberley_conservancy",
+            "wimberley_cabin"
+          ]
         },
         "taxDeductible": {
           "type": "boolean"
@@ -956,6 +1034,10 @@
         "updatedAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "calendarToken": {
+          "type": "string",
+          "maxLength": 64
         }
       },
       "required": [
@@ -999,7 +1081,10 @@
         },
         "role": {
           "type": "string",
-          "enum": ["owner", "member"]
+          "enum": [
+            "owner",
+            "member"
+          ]
         },
         "memberIds": {
           "type": "array",
@@ -1029,63 +1114,93 @@
   },
   "firestore": {
     "/users/{userId}": {
-      "schema": { "$ref": "#/entities/UserProfile" },
+      "schema": {
+        "$ref": "#/entities/UserProfile"
+      },
       "description": "User preferences, handle, and AI behavioral learning signals"
     },
     "/users/{userId}/private/{docId}": {
-      "schema": { "$ref": "#/entities/UserPrivateInfo" },
+      "schema": {
+        "$ref": "#/entities/UserPrivateInfo"
+      },
       "description": "Isolated PII subcollection accessible only by the owning user"
     },
     "/userHandles/{handle}": {
-      "schema": { "$ref": "#/entities/UserHandle" },
+      "schema": {
+        "$ref": "#/entities/UserHandle"
+      },
       "description": "Public handle lookup document (no email/PII) for username invitations"
     },
     "/tasks/{taskId}": {
-      "schema": { "$ref": "#/entities/ScheduleTask" },
+      "schema": {
+        "$ref": "#/entities/ScheduleTask"
+      },
       "description": "Personal tasks and appointments with reminders and AI help steps"
     },
     "/documents/{documentId}": {
-      "schema": { "$ref": "#/entities/ScannedDocument" },
+      "schema": {
+        "$ref": "#/entities/ScannedDocument"
+      },
       "description": "OCR-indexed scanned documents and keyword tags"
     },
     "/voiceMemories/{memoryId}": {
-      "schema": { "$ref": "#/entities/VoiceMemory" },
+      "schema": {
+        "$ref": "#/entities/VoiceMemory"
+      },
       "description": "Voice assistant memory logs and follow-up steps"
     },
     "/projects/{projectId}": {
-      "schema": { "$ref": "#/entities/SharedProject" },
+      "schema": {
+        "$ref": "#/entities/SharedProject"
+      },
       "description": "Shared collaborative task lists and projects"
     },
     "/projects/{projectId}/members/{memberId}": {
-      "schema": { "$ref": "#/entities/ProjectMember" },
+      "schema": {
+        "$ref": "#/entities/ProjectMember"
+      },
       "description": "Project members subcollection used as Master Gate"
     },
     "/projects/{projectId}/tasks/{taskId}": {
-      "schema": { "$ref": "#/entities/ProjectTask" },
+      "schema": {
+        "$ref": "#/entities/ProjectTask"
+      },
       "description": "Collaborative tasks assigned within a shared project"
     },
     "/projectInvites/{inviteId}": {
-      "schema": { "$ref": "#/entities/ProjectInvite" },
+      "schema": {
+        "$ref": "#/entities/ProjectInvite"
+      },
       "description": "Invitations to join shared projects by email or username"
     },
     "/notifications/{notificationId}": {
-      "schema": { "$ref": "#/entities/AppNotification" },
+      "schema": {
+        "$ref": "#/entities/AppNotification"
+      },
       "description": "Real-time notifications for shared group assignments and completions"
     },
     "/propertyEntries/{entryId}": {
-      "schema": { "$ref": "#/entities/PropertyEntry" },
+      "schema": {
+        "$ref": "#/entities/PropertyEntry"
+      },
       "description": "Wimberley, TX property conservancy, cabin maintenance, and guest stay monitoring logs"
     },
     "/financeEntries/{entryId}": {
-      "schema": { "$ref": "#/entities/FinanceEntry" },
+      "schema": {
+        "$ref": "#/entities/FinanceEntry"
+      },
       "description": "Categorized expenditures and income grouped by Conservancy, Home Repairs, Rental Upkeep, Groceries, Medical - Mom, Medical - Jason, and custom groups"
     },
     "/households/{householdId}": {
-      "schema": { "$ref": "#/entities/Household" },
+      "schema": {
+        "$ref": "#/entities/Household"
+      },
       "description": "Family household: members share tasks, documents, property entries, and finance records stamped with the household member list"
     },
     "/households/{householdId}/members/{memberId}": {
-      "schema": { "$ref": "#/entities/HouseholdMember" },
+      "schema": {
+        "$ref": "#/entities/HouseholdMember"
+      },
       "description": "Household members subcollection used as Master Gate"
     }
   }

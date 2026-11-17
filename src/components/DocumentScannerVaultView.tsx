@@ -21,6 +21,8 @@ import {
   ScheduleTask,
   getLocalTodayIso,
 } from '../types';
+import { getDriveAccessToken } from '../firebase';
+import { downloadDriveFileBlob } from '../services/googleDriveBackup';
 
 interface SuggestedTaskFromOCR {
   title: string;
@@ -33,7 +35,7 @@ interface SuggestedTaskFromOCR {
 interface DocumentScannerVaultViewProps {
   documents: ScannedDocument[];
   onSaveDocument: (
-    payload: Omit<ScannedDocument, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'householdId' | 'memberIds' | 'verificationStatus' | 'verifiedByName' | 'verifiedAtIso' | 'paperLocation'> & { paperLocation?: string }
+    payload: Omit<ScannedDocument, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'householdId' | 'memberIds' | 'verificationStatus' | 'verifiedByName' | 'verifiedAtIso' | 'paperLocation' | 'driveFileId'> & { paperLocation?: string }
   ) => Promise<string>;
   onUpdateDocument: (docId: string, updates: Partial<ScannedDocument>) => Promise<void>;
   onVerifyDocument: (doc: ScannedDocument) => Promise<void>;
@@ -87,6 +89,23 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
   const [activeTag, setActiveTag] = useState<string>('All');
   const [categoryFilter, setCategoryFilter] = useState<string>('All');
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
+  const [drivePhotoSrc, setDrivePhotoSrc] = useState<Record<string, string>>({});
+
+  // If the app server's copy of a photo is gone, show the photo from its
+  // permanent home in Google Drive instead.
+  async function loadPhotoFromDrive(docRecord: ScannedDocument) {
+    if (!docRecord.driveFileId || drivePhotoSrc[docRecord.id]) return;
+    const token = getDriveAccessToken();
+    if (!token) return;
+    try {
+      const blob = await downloadDriveFileBlob(token, docRecord.driveFileId);
+      const url = URL.createObjectURL(blob);
+      setDrivePhotoSrc((prev) => ({ ...prev, [docRecord.id]: url }));
+    } catch {
+      // Leave the broken image as it is; Drive Backups can restore the
+      // server copy from Drive.
+    }
+  }
 
   // Scanner modal state
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -614,7 +633,8 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
             {selectedDoc.imageUrl && (
               <div className="rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950 max-h-64 flex items-center justify-center">
                 <img
-                  src={selectedDoc.imageUrl}
+                  src={drivePhotoSrc[selectedDoc.id] || selectedDoc.imageUrl}
+                  onError={() => void loadPhotoFromDrive(selectedDoc)}
                   alt={selectedDoc.title}
                   referrerPolicy="no-referrer"
                   className="max-h-64 w-auto object-contain"
