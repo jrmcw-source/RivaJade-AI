@@ -30,11 +30,14 @@ their own phone or computer.
 
 The desk is Mom's — she is the trunk. Two main branches:
 
-- **Texas** — **Riva Jade**, one property (5151 Wayside Dr, Wimberley): the
-  **Homestead** (the main house, Mom's official residence), the **Rental
-  Cabin** under the homestead, and the **Wildlife Conservancy** — the rest
-  of the land, under its wildlife exemption. Each keeps its own expenses,
-  upkeep, and tax treatment (Texas law).
+- **Texas** — **Riva Jade**, one property (5151 Wayside Dr, Wimberley),
+  21.6 acres: the **Homestead** is 1 acre — the main house (Mom's official
+  residence), the barn, the big shop, a little shop, a storage shed, and
+  the **Rental Cabin**, which sits inside the homestead acre. The other
+  20.6 acres are the **Wildlife Conservancy**: riverfront, windmills, bird
+  houses and bat houses, and acreage left natural under its wildlife
+  exemption. Each keeps its own expenses, upkeep, and tax treatment
+  (Texas law).
 - **Louisiana** — **Oakleaf**, the Lafayette house (Jason's place, Mom's in
   reserve), and **Elephant Walk**, Derek and Dawn's place in Carencro,
   where Mom helps with some bills.

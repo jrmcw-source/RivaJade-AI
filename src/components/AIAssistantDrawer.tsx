@@ -164,7 +164,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
         (t) =>
           `- [${t.priority.toUpperCase()}] ${t.title} (${t.category}, due ${t.dueDate}${
             t.dueTime ? ` ${t.dueTime}` : ''
-          }, ${t.estimatedMinutes}m)`
+          }, ${t.estimatedMinutes}m)${t.place ? ` @ ${t.place}` : ''}`
       )
       .join('\n');
 
@@ -208,7 +208,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
         (f) =>
           `- ${f.entryDate} | ${f.kind} | ${f.group} | ${f.title}: $${f.amount.toFixed(2)}${
             f.vendor ? ` (${f.vendor})` : ''
-          }`
+          }${f.place ? ` @ ${f.place}` : ''}${f.careForJason ? " (for Jason's care)" : ''}`
       )
       .join('\n');
 
@@ -218,7 +218,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
         (d) =>
           `- ${d.title} (${d.category}, date ${d.detectedDate || 'n/a'}, tags: ${
             d.tags.join(', ') || 'none'
-          })${d.summary ? ` — ${d.summary.slice(0, 120)}` : ''}`
+          })${d.place ? ` @ ${d.place}` : ''}${d.summary ? ` — ${d.summary.slice(0, 120)}` : ''}`
       )
       .join('\n');
 

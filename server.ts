@@ -826,9 +826,10 @@ Analyze deadlines (overdue vs today vs upcoming), user-assigned importance (high
       const response = await ai.models.generateContent({
         model: 'gemini-4-hydrogen',
         contents: `Date (Central Time): ${currentDate || new Date().toISOString().slice(0, 10)}
-Location: Family property in Wimberley, TX (Hays County / Texas Hill Country) featuring:
-1) Land Conservancy stewardship (native grasses, live/red oaks, oak wilt prevention, Ashe juniper/cedar management, rainwater cistern/well, boundary fencing, wildlife/ag valuation records, creek erosion).
-2) Rental Cabin operations (guest turnovers, smart lock codes, septic/aerobic system, HVAC filters, propane tank, smoke/CO detectors, well pump & water filtration).
+Location: Riva Jade, the family property in Wimberley, TX (Hays County / Texas Hill Country) — 21.6 acres on the Blanco River:
+1) The homestead is 1 acre: the main house, the barn, the big shop, a little shop, a storage shed, and the separate rental cabin.
+2) The other 20.6 acres are a wildlife conservancy: the riverfront, windmills, bird houses and bat houses, and acreage left natural — deadfall stays where it falls, and there are no improvements beyond supporting Texas native flora and fauna. Stewardship protects that natural state (native grasses, live/red oaks, oak wilt prevention, Ashe juniper/cedar management, rainwater cistern/well, boundary fencing, wildlife valuation records, creek erosion). Never recommend clearing deadfall, mowing the natural acreage, or building in the conservancy.
+3) Rental Cabin operations (guest turnovers, smart lock codes, septic/aerobic system, HVAC filters, propane tank, smoke/CO detectors, well pump & water filtration).
 
 Live Weather & Environmental Context:
 ${weatherSummary || 'Unavailable'}
@@ -949,9 +950,9 @@ ${recentHistory}
 
 Respond to the user's latest message directly using their real workspace data above. When helpful, propose 0 to 3 ready-to-apply suggestedActions that the user can trigger with one click.
 For each action in suggestedActions, set payloadJson to a valid JSON string matching its type:
-- "create_task": {"title":string,"category":one of ${JSON.stringify(CATEGORIES)},"type":"task"|"appointment","dueDate":"YYYY-MM-DD","dueTime":"HH:MM" or "","priority":"low"|"medium"|"high","estimatedMinutes":number,"notes":string}
-- "log_expense": {"title":string,"amount":number,"group":"Conservancy"|"Home Repairs"|"Rental Upkeep"|"Groceries"|"Medical - Mom"|"Medical - Jason"|"Utilities & Propane"|"Taxes & Insurance"|"Car & Maintenance"|"Church & Community"|"Rental Income"|"General","kind":"expense"|"income","vendor":string,"entryDate":"YYYY-MM-DD","propertyScope":"general"|"home"|"wimberley_conservancy"|"wimberley_cabin","taxDeductible":boolean,"notes":string}
-- "create_property_entry": {"title":string,"area":"conservancy"|"cabin_maintenance"|"cabin_stay","status":"nominal"|"attention"|"urgent"|"upcoming"|"ready"|"completed","scheduledDate":"YYYY-MM-DD","cadence":"once"|"monthly"|"quarterly"|"seasonal"|"annual","inspectorOrGuest":string,"notes":string}
+- "create_task": {"title":string,"category":one of ${JSON.stringify(CATEGORIES)},"place":"Riva Jade"|"Riva Jade — Homestead"|"Riva Jade — Rental Cabin"|"Riva Jade — Wildlife Conservancy"|"Oakleaf"|"Elephant Walk"|"","type":"task"|"appointment","dueDate":"YYYY-MM-DD","dueTime":"HH:MM" or "","priority":"low"|"medium"|"high","estimatedMinutes":number,"notes":string}
+- "log_expense": {"title":string,"amount":number,"group":"Conservancy"|"Home Repairs"|"Rental Upkeep"|"Groceries"|"Medical - Mom"|"Medical - Jason"|"Utilities & Propane"|"Taxes & Insurance"|"Car & Maintenance"|"Church & Community"|"Rental Income"|"General","kind":"expense"|"income","vendor":string,"entryDate":"YYYY-MM-DD","place":"Riva Jade"|"Riva Jade — Homestead"|"Riva Jade — Rental Cabin"|"Riva Jade — Wildlife Conservancy"|"Oakleaf"|"Elephant Walk"|"","careForJason":boolean,"taxDeductible":boolean,"notes":string}
+- "create_property_entry": {"title":string,"place":"Riva Jade"|"Riva Jade — Homestead"|"Riva Jade — Rental Cabin"|"Riva Jade — Wildlife Conservancy"|"Oakleaf"|"Elephant Walk"|"","area":"conservancy"|"cabin_maintenance"|"cabin_stay","status":"nominal"|"attention"|"urgent"|"upcoming"|"ready"|"completed","scheduledDate":"YYYY-MM-DD","cadence":"once"|"monthly"|"quarterly"|"seasonal"|"annual","inspectorOrGuest":string,"notes":string}
 - "open_drive_backup": {"reason":string}
 - "navigate": {"tab":"schedule"|"property"|"finances"|"vault"|"projects"|"voice"|"analytics"}`,
         config: {
@@ -1141,9 +1142,17 @@ For each action in suggestedActions, set payloadJson to a valid JSON string matc
           kind: { type: Type.STRING, enum: ['expense', 'income'] },
           vendor: { type: Type.STRING },
           entryDate: { type: Type.STRING, description: 'YYYY-MM-DD' },
-          propertyScope: {
+          place: {
             type: Type.STRING,
-            enum: ['general', 'home', 'wimberley_conservancy', 'wimberley_cabin'],
+            enum: [
+              '',
+              'Riva Jade',
+              'Riva Jade — Homestead',
+              'Riva Jade — Rental Cabin',
+              'Riva Jade — Wildlife Conservancy',
+              'Oakleaf',
+              'Elephant Walk',
+            ],
           },
           taxDeductible: { type: Type.BOOLEAN },
         },
