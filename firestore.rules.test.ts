@@ -1,0 +1,102 @@
+/**
+ * Security Rule Adversarial Verification Suite (Dirty Dozen)
+ * Validates DRAFT_firestore.rules / firestore.rules invariants.
+ */
+
+export const DIRTY_DOZEN_PAYLOADS = [
+  {
+    name: '1. Unauthenticated read/write on /tasks/t1',
+    auth: null,
+    operation: 'create',
+    path: '/tasks/t1',
+    data: { title: 'Test' },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '2. Unverified email write on /tasks/t1',
+    auth: { uid: 'u1', token: { email_verified: false } },
+    operation: 'create',
+    path: '/tasks/t1',
+    data: { userId: 'u1', title: 'Unverified' },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '3. Identity spoofing create on /tasks/t2',
+    auth: { uid: 'attacker_uid', token: { email_verified: true } },
+    operation: 'create',
+    path: '/tasks/t2',
+    data: { userId: 'victim_uid', title: 'Spoofed' },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '4. Shadow field injection on /tasks/t3',
+    auth: { uid: 'u1', token: { email_verified: true } },
+    operation: 'create',
+    path: '/tasks/t3',
+    data: { userId: 'u1', title: 'Legit', isAdmin: true },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '5. Cross-user list scraping on /documents',
+    auth: { uid: 'attacker_uid', token: { email_verified: true } },
+    operation: 'list',
+    path: '/documents',
+    query: 'unfiltered',
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '6. Cross-user PII get on /users/victim_uid/private/info',
+    auth: { uid: 'attacker_uid', token: { email_verified: true } },
+    operation: 'get',
+    path: '/users/victim_uid/private/info',
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '7. Timestamp forgery on /tasks/t4',
+    auth: { uid: 'u1', token: { email_verified: true } },
+    operation: 'create',
+    path: '/tasks/t4',
+    data: { userId: 'u1', createdAt: '2020-01-01T00:00:00Z' },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '8. ID poisoning with invalid characters/length',
+    auth: { uid: 'u1', token: { email_verified: true } },
+    operation: 'create',
+    path: '/tasks/bad..id..with..invalid$chars',
+    data: { userId: 'u1', title: 'ID Poison' },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '9. Oversized OCR text DoS (> 100000 chars)',
+    auth: { uid: 'u1', token: { email_verified: true } },
+    operation: 'create',
+    path: '/documents/d1',
+    data: { userId: 'u1', ocrTextLength: 150000 },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '10. Unbounded array injection (> 20 tags)',
+    auth: { uid: 'u1', token: { email_verified: true } },
+    operation: 'create',
+    path: '/documents/d2',
+    data: { userId: 'u1', tagsCount: 50 },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '11. Owner transfer update on /tasks/t1',
+    auth: { uid: 'u1', token: { email_verified: true } },
+    operation: 'update',
+    path: '/tasks/t1',
+    data: { userId: 'u2' },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '12. Terminal state mutation on completed task without reopen',
+    auth: { uid: 'u1', token: { email_verified: true } },
+    operation: 'update',
+    path: '/tasks/t_completed',
+    data: { title: 'Tampered Title', status: 'completed' },
+    expected: 'PERMISSION_DENIED',
+  },
+];

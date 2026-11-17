@@ -1,0 +1,6 @@
+{
+  "name": "Steward — Schedule, OCR Vault & Voice",
+  "description": "Personal schedule, reminders, AI task helper, camera OCR document vault, Gemini Live voice assistant, and progress analytics across desktop, iOS, and Android.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
