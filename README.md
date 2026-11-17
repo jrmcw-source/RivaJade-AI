@@ -36,8 +36,12 @@ The desk is Mom's — she is the trunk. Two main branches:
   the **Rental Cabin**, which sits inside the homestead acre. The other
   20.6 acres are the **Wildlife Conservancy**: riverfront, windmills, bird
   houses and bat houses, and acreage left natural under its wildlife
-  exemption. Each keeps its own expenses, upkeep, and tax treatment
-  (Texas law).
+  exemption. Its expenses are the exemption's own work — maintaining the
+  land natively, supplemental water for wildlife, sanctuaries for birds,
+  ducks, and bats, removing invasive species, supporting native species.
+  Each place keeps its own expenses, upkeep, and tax treatment: the
+  conservancy, the homestead, and the rental cabin each answer to their
+  own Texas rules, and the Louisiana places to Louisiana's.
 - **Louisiana** — **Oakleaf**, the Lafayette house (Jason's place, Mom's in
   reserve), and **Elephant Walk**, Derek and Dawn's place in Carencro,
   where Mom helps with some bills.
