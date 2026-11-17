@@ -114,7 +114,40 @@ function getGenAIClient() {
 }
 
 async function createApp() {
-  const app = express();
+  // The family's place tree, written for the AI surfaces (chat assistant,
+// voice assistant, document scan). Jason set this layout on 2026-11-17 and
+// asked that the assistant be left a description of it, so sorting and
+// filing respect the division from the first request.
+const PLACE_TREE_BRIEF = `THE FAMILY'S PLACES — HOW THIS DESK IS ORGANIZED:
+This desk belongs to Mom. She is the trunk of the tree; everything on the desk is hers. She is officially a Texas resident. Two main branches grow from the trunk: Texas and Louisiana.
+
+THE PEOPLE:
+- Mom — the owner of this desk and of both properties; Jason's and Derek's mother. The property Riva Jade is named for her.
+- Jason McWhirter — Mom's younger son. He lives at Oakleaf and helps Mom with this desk. The "Jason's care" expenses are spending on his care.
+- Derek — Mom's older son. He lives at Elephant Walk and buys things for Riva Jade.
+- Dawn — Derek's wife, at Elephant Walk. She drives Jason's old car; Mom pays for its insurance.
+- Haydon, Kenzie, and Camden (Cam) — Derek and Dawn's children, the Elephant Walk family.
+- Dan Angelo Silverio Bo — Jason's partner; his name may appear in Oakleaf papers and photos.
+- A long-term renter couple lives at Riva Jade and watches the property when Mom is in Louisiana.
+
+TEXAS — Riva Jade, one property: 21.6 acres at 5151 Wayside Dr, Wimberley, TX, on the Blanco River.
+- "Riva Jade" — the whole property, when a record concerns all of it.
+- "Riva Jade — Homestead" — the 1-acre homestead: the main house (Mom's official residence), the barn, the big shop, a little shop, and a storage shed.
+- "Riva Jade — Rental Cabin" — the separate rental cabin, which sits inside the homestead acre and is the Homestead's own branch: cabin stays, guests, turnovers, and cabin upkeep.
+- "Riva Jade — Wildlife Conservancy" — the other 20.6 acres: riverfront, windmills, bird, duck, and bat sanctuaries, and acreage left natural. Its expenses are wildlife-management work under a tax exemption: native upkeep, supplemental water, sanctuaries, removing invasive species, supporting native species.
+
+LOUISIANA:
+- "Oakleaf" — Mom's house in Lafayette, LA. Jason lives there now; the house is Mom's, held in reserve for her. Some of Mom's spending there is for Jason's care in his health state — when an expense is for his care, mark careForJason true.
+- "Elephant Walk" — Derek and Dawn's house at 410 Elephant Walk, Carencro, LA. Mom helps with some bills there (for example, Jason's old car and its insurance, which Dawn uses).
+
+HOW TO SORT AND APPLY RECORDS:
+- Every task, document, expense, and property entry belongs to exactly one of the six place names above, or is general (place "") when it belongs to the whole desk.
+- Choose the branch by what the record is ABOUT — the property, house, land, vehicle, or bill it concerns — not by who mentions it.
+- Respect the division from the first step: keep each branch's money, papers, and tasks separate in answers and totals, and name the branch you are reporting on. A wider branch includes everything under it: Riva Jade includes the homestead, the cabin, and the conservancy; Texas means all of Riva Jade; Louisiana means Oakleaf and Elephant Walk together; everything together is Mom's whole desk.
+- The branches answer to different tax rules: the conservancy (exemption), the homestead, and the rental cabin each have their own Texas treatment, and the Louisiana places follow Louisiana rules. Never merge them in a total unless the user asks for the wider view.
+- If a record's branch is not clear from what the user said or what a document shows, leave it general and say it is unfiled by place. Never guess a branch for money or paperwork.`;
+
+const app = express();
   app.use(express.json({ limit: '24mb' }));
 
   // Serve uploaded document scan images safely
@@ -301,7 +334,10 @@ async function createApp() {
 4. Extract keyDetails as "Label: Value" strings (e.g., "Amount Due: $148.00", "Due Date: 2026-12-01", "Provider: City Auto").
 5. Detect any primary action/due/appointment date as YYYY-MM-DD in detectedDate (or empty string if none).
 6. Propose 3-6 lowercase keyword tags for search indexing.
-7. Suggest 0-3 actionable follow-up tasks with practical step-by-step help instructions.`,
+7. Suggest 0-3 actionable follow-up tasks with practical step-by-step help instructions.
+8. Decide which single place this document belongs to, using the place tree below, and return its exact name in place — or an empty string if it belongs to the desk generally. Judge by what the document is about (the property, house, land, vehicle, or bill it concerns), never by who is holding it.
+
+${PLACE_TREE_BRIEF}`,
             },
           ],
         },
@@ -320,6 +356,18 @@ async function createApp() {
               ocrText: { type: Type.STRING },
               summary: { type: Type.STRING },
               detectedDate: { type: Type.STRING },
+              place: {
+                type: Type.STRING,
+                enum: [
+                  '',
+                  'Riva Jade',
+                  'Riva Jade — Homestead',
+                  'Riva Jade — Rental Cabin',
+                  'Riva Jade — Wildlife Conservancy',
+                  'Oakleaf',
+                  'Elephant Walk',
+                ],
+              },
               keyDetails: {
                 type: Type.ARRAY,
                 items: { type: Type.STRING },
@@ -367,6 +415,7 @@ async function createApp() {
         ocrText: parsed.ocrText || '',
         summary: parsed.summary || '',
         detectedDate: parsed.detectedDate || '',
+        place: typeof parsed.place === 'string' ? parsed.place : '',
         keyDetails: Array.isArray(parsed.keyDetails) ? parsed.keyDetails.slice(0, 25) : [],
         suggestedTags: Array.isArray(parsed.suggestedTags)
           ? parsed.suggestedTags.map((t: string) => String(t).toLowerCase().trim()).filter(Boolean).slice(0, 12)
@@ -958,7 +1007,8 @@ For each action in suggestedActions, set payloadJson to a valid JSON string matc
         config: {
           thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           systemInstruction:
-            'You are Steward AI Assistant, a knowledgeable, concise, practical household, Texas Hill Country property, and personal finance assistant. Ground every answer in the user workspace data provided. Never invent fake totals or documents. Use plain, helpful prose and only include suggestedActions when genuinely actionable.',
+            'You are Steward AI Assistant, a knowledgeable, concise, practical household, Texas Hill Country property, and personal finance assistant. Ground every answer in the user workspace data provided. Never invent fake totals or documents. Use plain, helpful prose and only include suggestedActions when genuinely actionable.' +
+            PLACE_TREE_BRIEF,
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
@@ -1217,6 +1267,8 @@ ${ctx.financeSummary || 'No financial entries logged yet.'}
 
 OCR DOCUMENT VAULT SUMMARY:
 ${ctx.documentsSummary || 'No scanned documents yet.'}
+
+${PLACE_TREE_BRIEF}
 
 Guidelines:
 - Keep spoken answers natural, warm, and concise (2-4 sentences unless asked for detail).

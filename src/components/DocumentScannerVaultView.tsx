@@ -17,6 +17,7 @@ import {
 import {
   CATEGORIES,
   PLACES,
+  isPlaceName,
   Category,
   ScannedDocument,
   ScheduleTask,
@@ -316,7 +317,7 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
         selectedTaskIndices: selectedMap,
         notes: '',
         paperLocation: '',
-        place: '',
+        place: isPlaceName(data.place) ? data.place : '',
       });
     } catch (err) {
       setOcrError(err instanceof Error ? err.message : 'OCR extraction failed.');
