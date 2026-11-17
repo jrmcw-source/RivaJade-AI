@@ -163,6 +163,7 @@ RECORD RETENTION AND DISCLOSURE — THE DESK'S STANDING LAW:
 - The desk's own working set — what fills totals and ordinary answers — keeps, per branch, the LONGEST limit in that branch's table rows (Riva Jade and the Conservancy 5 years, the Rental Cabin 4, the Homestead and both Louisiana places 3), so nothing any agency can still reach is ever out of the family's view. The per-agency cut happens when an output is prepared for that agency.
 - Longer reaches exist for special cases — 6 years where income was substantially underreported (federal and Louisiana), 7 years for federal bad-debt or worthless-securities claims, and no limit for unfiled or fraudulent returns. Those are exceptions, not working limits; the archive still holds those years for the family.
 - If a request reaches beyond an agency's limit in the table, or asks the family to sign an extension of a deadline (a waiver of prescription), do not settle it either way: flag it for the family to decide.
+- THE DEEP ARCHIVE: a finance record 8 years old to the day, or older, is archived automatically — no one decides it, the date decides it. It leaves the ledger, the totals, the exports, and your own working context. It is kept (the backups hold it) and the family can retrieve it deliberately, but never include one in an answer or an output: 8 years is past every reach in the table, including the 7-year exception.
 - Property records are different: deeds, titles, and purchase records stay active as long as the family owns the property, whatever their age.`;
 
 const app = express();

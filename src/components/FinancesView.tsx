@@ -17,6 +17,7 @@ import {
   PLACES,
   placeMatches,
   isArchivedFinanceEntry,
+  isDeepArchivedFinanceEntry,
   AGENCY_TABLE,
   AGENCY_NAMES,
   agencyLimitFor,
@@ -136,6 +137,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     const ninetyDaysAgo = new Date(nowMs - 90 * 86400000).toISOString().slice(0, 10);
 
     return entries.filter((e) => {
+      if (isDeepArchivedFinanceEntry(e.entryDate, today)) return false;
       if (scopeFilter === 'general') {
         if ((e.place || '') !== '') return false;
       } else if (scopeFilter !== 'all' && !placeMatches(e.place || '', scopeFilter)) {
@@ -147,6 +149,17 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
       return true;
     });
   }, [entries, timeframe, scopeFilter]);
+
+  const deepArchivedCount = useMemo(
+    () =>
+      entries.filter((e) => {
+        if (!isDeepArchivedFinanceEntry(e.entryDate, getLocalTodayIso())) return false;
+        if (scopeFilter === 'general') return (e.place || '') === '';
+        if (scopeFilter !== 'all') return placeMatches(e.place || '', scopeFilter);
+        return true;
+      }).length,
+    [entries, scopeFilter]
+  );
 
   // Retention: the working set is each record's legal window for its
   // branch. Archived entries join only when deliberately included.
@@ -724,6 +737,15 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
               </div>
             )}
           </div>
+
+          {deepArchivedCount > 0 && (
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Deep archive: {deepArchivedCount} record{deepArchivedCount === 1 ? '' : 's'} 8 years
+              old or older, archived automatically. Kept in the backups for the family to
+              retrieve — past every legal reach, so they no longer appear in the ledger or
+              exports.
+            </p>
+          )}
 
           {visibleLedger.length === 0 ? (
             <div className="py-12 text-center space-y-3">
