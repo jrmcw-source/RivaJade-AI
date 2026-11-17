@@ -740,7 +740,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
 
           {deepArchivedCount > 0 && (
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Deep archive: {deepArchivedCount} record{deepArchivedCount === 1 ? '' : 's'} 8 years
+              Deep archive: {deepArchivedCount} record{deepArchivedCount === 1 ? '' : 's'} 7 years
               old or older, archived automatically. Kept in the backups for the family to
               retrieve — past every legal reach, so they no longer appear in the ledger or
               exports.

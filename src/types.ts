@@ -179,14 +179,14 @@ export function isArchivedFinanceEntry(
   return entry.entryDate < `${cutoffYear}-01-01`;
 }
 
-// The deep archive (Jason, 2026-11-17): a finance record 8 years old to
-// the day, or older, is archived automatically — past every legal reach
-// in the table, including the 7-year exception. It leaves the ledger,
-// totals, exports, and the assistant's context entirely; it is still
-// kept (backups hold it) for deliberate family retrieval.
+// The deep archive (Jason, 2026-11-17): a finance record 7 years old to
+// the day, or older, is archived automatically — 7 years is the legal
+// maximum, the longest any rule in the table reaches. It leaves the
+// ledger, totals, exports, and the assistant's context entirely; it is
+// still kept (backups hold it) for deliberate family retrieval.
 export function isDeepArchivedFinanceEntry(entryDate: string, todayIso: string): boolean {
   const d = new Date(`${todayIso}T12:00:00`);
-  d.setFullYear(d.getFullYear() - 8);
+  d.setFullYear(d.getFullYear() - 7);
   const cutoff = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
     d.getDate()
   ).padStart(2, '0')}`;

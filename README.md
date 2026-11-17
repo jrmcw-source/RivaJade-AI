@@ -85,7 +85,7 @@ Parish, the same parish as Oakleaf, so the Louisiana branches share one
 agency table. The most recent 3 years of any branch are the access
 floor — the smallest limit in the table — and are available to a user
 asking with no who's-asking question; that question applies only when
-an output would reach beyond 3 years. And at 8 years old to the day, a
+an output would reach beyond 3 years. And at 7 years old to the day, a
 finance record drops into the deep archive automatically: out of the
 ledger, totals, exports, and the assistant's context entirely, though
 still kept in the data and the backups for the family to retrieve.
