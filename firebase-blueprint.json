@@ -227,6 +227,11 @@
           "type": "string",
           "maxLength": 128
         },
+        "place": {
+            "type": "string",
+            "maxLength": 60,
+            "description": "Which branch of the family's place tree this record belongs to (PLACES in src/types.ts; Mom is the trunk). Empty means the desk generally."
+        },
         "completedAtIso": {
           "type": "string",
           "maxLength": 40
@@ -363,6 +368,11 @@
         "driveFileId": {
           "type": "string",
           "maxLength": 128
+        },
+        "place": {
+            "type": "string",
+            "maxLength": 60,
+            "description": "Which branch of the family's place tree this record belongs to (PLACES in src/types.ts; Mom is the trunk). Empty means the desk generally."
         }
       },
       "required": [
@@ -875,6 +885,11 @@
           "type": "string",
           "maxLength": 128
         },
+        "place": {
+            "type": "string",
+            "maxLength": 60,
+            "description": "Which branch of the family's place tree this record belongs to (PLACES in src/types.ts; Mom is the trunk). Empty means the desk generally."
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
@@ -968,6 +983,15 @@
           "type": "string",
           "maxLength": 128
         },
+        "place": {
+            "type": "string",
+            "maxLength": 60,
+            "description": "Which branch of the family's place tree this record belongs to (PLACES in src/types.ts; Mom is the trunk). Empty means the desk generally."
+        },
+        "careForJason": {
+            "type": "boolean",
+            "description": "True when this entry is money Mom spent taking care of Jason (tracked at Oakleaf)."
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
@@ -987,7 +1011,6 @@
         "amount",
         "entryDate",
         "vendor",
-        "propertyScope",
         "taxDeductible",
         "notes",
         "linkedDocumentId",

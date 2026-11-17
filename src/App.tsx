@@ -46,6 +46,10 @@ import {
 import {
   AppNotification,
   CATEGORIES,
+  PLACES,
+  PLACE_FILTERS,
+  placeMatches,
+  isPlaceName,
   Category,
   FinanceEntry,
   FocusWindow,
@@ -103,13 +107,24 @@ function sanitizeHandle(raw: string, fallbackUid: string): string {
 
 
 function withHouseholdDefaults<
-  T extends { userId: string; householdId?: string; memberIds?: string[] },
+  T extends { userId: string; householdId?: string; memberIds?: string[]; place?: string },
 >(rec: T): T {
   return {
     ...rec,
     householdId: rec.householdId || '',
     memberIds:
       Array.isArray(rec.memberIds) && rec.memberIds.length > 0 ? rec.memberIds : [rec.userId],
+    place: rec.place || '',
+  };
+}
+
+function withFinanceDefaults(
+  rec: Omit<FinanceEntry, 'id'>
+): Omit<FinanceEntry, 'id'> {
+  const base = withHouseholdDefaults(rec);
+  return {
+    ...base,
+    careForJason: Boolean(base.careForJason),
   };
 }
 
@@ -169,6 +184,7 @@ function MainApp() {
   const [sharedFinanceEntries, setSharedFinanceEntries] = useState<FinanceEntry[]>([]);
   const [households, setHouseholds] = useState<Household[]>([]);
   const [selectedHouseholdId, setSelectedHouseholdId] = useState<string>('');
+  const [selectedPlace, setSelectedPlace] = useState<string>('');
   const [joinableHouseholds, setJoinableHouseholds] = useState<Household[]>([]);
   const [householdMembers, setHouseholdMembers] = useState<HouseholdMember[]>([]);
   const [shareWithHousehold, setShareWithHousehold] = useState(true);
@@ -464,7 +480,7 @@ function MainApp() {
         setOwnFinanceEntries(
           snap.docs.map((d) => ({
             id: d.id,
-            ...withHouseholdDefaults(d.data() as Omit<FinanceEntry, 'id'>),
+            ...withFinanceDefaults(d.data() as Omit<FinanceEntry, 'id'>),
           }))
         );
       },
@@ -477,7 +493,7 @@ function MainApp() {
         setSharedFinanceEntries(
           snap.docs.map((d) => ({
             id: d.id,
-            ...withHouseholdDefaults(d.data() as Omit<FinanceEntry, 'id'>),
+            ...withFinanceDefaults(d.data() as Omit<FinanceEntry, 'id'>),
           }))
         );
       },
@@ -589,6 +605,17 @@ function MainApp() {
     }
   }
 
+  function switchPlace(place: string) {
+    setSelectedPlace(place);
+    if (user) {
+      try {
+        localStorage.setItem(`steward-place-${user.uid}`, place);
+      } catch {
+        // Storage unavailable; the choice still holds for this session.
+      }
+    }
+  }
+
   // Restore the household this person was last viewing on this device.
   useEffect(() => {
     if (!user) return;
@@ -599,6 +626,17 @@ function MainApp() {
       // Storage unavailable; fall back to the first household.
     }
   }, [user]);
+  // Restore the place this person was last viewing on this device.
+  useEffect(() => {
+    if (!user) return;
+    try {
+      const saved = localStorage.getItem(`steward-place-${user.uid}`);
+      if (saved !== null) setSelectedPlace(saved);
+    } catch {
+      // Storage unavailable; show all places.
+    }
+  }, [user]);
+
   const tasks = useMemo(
     () => mergeRecordsById(ownTasks, sharedTasks),
     [ownTasks, sharedTasks]
@@ -643,6 +681,26 @@ function MainApp() {
     () => financeEntries.filter((f) => householdInScope(f.householdId)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [financeEntries, activeHousehold, households]
+  );
+
+  // The place filter: choosing a branch shows that branch and everything
+  // under it; '' is Mom's whole desk, the master copy. Backup, restore,
+  // and the membership sync keep the wider lists above.
+  const displayTasks = useMemo(
+    () => visibleTasks.filter((t) => placeMatches(t.place || '', selectedPlace)),
+    [visibleTasks, selectedPlace]
+  );
+  const displayDocuments = useMemo(
+    () => visibleDocuments.filter((d) => placeMatches(d.place || '', selectedPlace)),
+    [visibleDocuments, selectedPlace]
+  );
+  const displayPropertyEntries = useMemo(
+    () => visiblePropertyEntries.filter((e) => placeMatches(e.place || '', selectedPlace)),
+    [visiblePropertyEntries, selectedPlace]
+  );
+  const displayFinanceEntries = useMemo(
+    () => visibleFinanceEntries.filter((e) => placeMatches(e.place || '', selectedPlace)),
+    [visibleFinanceEntries, selectedPlace]
   );
 
   const activeHouseholdId = activeHousehold?.householdId ?? null;
@@ -753,7 +811,7 @@ function MainApp() {
   const activeReminders = useMemo(() => {
     const todayIso = getLocalTodayIso();
     const now = new Date();
-    return visibleTasks.filter((t) => {
+    return displayTasks.filter((t) => {
       if (t.status !== 'pending' || dismissedReminders[t.id]) return false;
       if (t.dueDate < todayIso) return true;
       if (t.dueDate === todayIso) {
@@ -770,7 +828,7 @@ function MainApp() {
       const remindAt = new Date(dueDateObj.getTime() - t.reminderMinutes * 60000);
       return now >= remindAt;
     });
-  }, [visibleTasks, dismissedReminders]);
+  }, [displayTasks, dismissedReminders]);
 
   // ---------------------------------------------------------------------------
   // Firestore CRUD Handlers (strictly matching firebase-blueprint.json & rules)
@@ -809,6 +867,7 @@ function MainApp() {
         title: payload.title.slice(0, 200),
         type: payload.type,
         category: payload.category,
+        place: (payload.place || '').slice(0, 60),
         dueDate: payload.dueDate,
         dueTime: (payload.dueTime || '').slice(0, 10),
         estimatedMinutes: Math.max(5, Math.min(1440, payload.estimatedMinutes || 30)),
@@ -855,6 +914,7 @@ function MainApp() {
         clean.helpSteps = updates.helpSteps.slice(0, 15).map((s) => s.slice(0, 400));
       if (updates.linkedDocumentId !== undefined)
         clean.linkedDocumentId = updates.linkedDocumentId.slice(0, 128);
+      if (updates.place !== undefined) clean.place = updates.place.slice(0, 60);
 
       await updateDoc(doc(db, 'tasks', taskId), clean);
     } catch (err) {
@@ -1005,6 +1065,7 @@ function MainApp() {
         verifiedAtIso: '',
         paperLocation: (payload.paperLocation || '').slice(0, 200),
         driveFileId,
+        place: (payload.place || '').slice(0, 60),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
@@ -1037,6 +1098,7 @@ function MainApp() {
         clean.paperLocation = updates.paperLocation.slice(0, 200);
       if (updates.driveFileId !== undefined)
         clean.driveFileId = updates.driveFileId.slice(0, 128);
+      if (updates.place !== undefined) clean.place = updates.place.slice(0, 60);
       const existingDoc = documents.find((r) => r.id === docId);
       if (existingDoc) {
         clean.householdId = existingDoc.householdId || '';
@@ -1054,6 +1116,7 @@ function MainApp() {
           clean.paperLocation = existingDoc.paperLocation || '';
         if (clean.driveFileId === undefined)
           clean.driveFileId = existingDoc.driveFileId || '';
+        if (clean.place === undefined) clean.place = existingDoc.place || '';
       }
 
       await updateDoc(doc(db, 'documents', docId), clean);
@@ -1429,6 +1492,7 @@ function MainApp() {
         householdId: stamp.householdId,
         memberIds: stamp.memberIds,
         area: payload.area,
+        place: (payload.place || '').slice(0, 60),
         title: payload.title.slice(0, 200),
         status: payload.status,
         scheduledDate: payload.scheduledDate,
@@ -1469,6 +1533,7 @@ function MainApp() {
       if (updates.notes !== undefined) clean.notes = updates.notes.slice(0, 2000);
       if (updates.linkedDocumentId !== undefined)
         clean.linkedDocumentId = updates.linkedDocumentId.slice(0, 128);
+      if (updates.place !== undefined) clean.place = updates.place.slice(0, 60);
 
       await updateDoc(doc(db, 'propertyEntries', entryId), clean);
     } catch (err) {
@@ -1502,7 +1567,8 @@ function MainApp() {
         amount: Math.max(0, Math.min(10000000, Number(payload.amount) || 0)),
         entryDate: payload.entryDate,
         vendor: (payload.vendor || '').slice(0, 120),
-        propertyScope: payload.propertyScope,
+        place: (payload.place || '').slice(0, 60),
+        careForJason: Boolean(payload.careForJason),
         taxDeductible: Boolean(payload.taxDeductible),
         notes: (payload.notes || '').slice(0, 2000),
         linkedDocumentId: (payload.linkedDocumentId || '').slice(0, 128),
@@ -1534,7 +1600,8 @@ function MainApp() {
         clean.amount = Math.max(0, Math.min(10000000, Number(updates.amount) || 0));
       if (updates.entryDate !== undefined) clean.entryDate = updates.entryDate;
       if (updates.vendor !== undefined) clean.vendor = updates.vendor.slice(0, 120);
-      if (updates.propertyScope !== undefined) clean.propertyScope = updates.propertyScope;
+      if (updates.place !== undefined) clean.place = updates.place.slice(0, 60);
+      if (updates.careForJason !== undefined) clean.careForJason = Boolean(updates.careForJason);
       if (updates.taxDeductible !== undefined) clean.taxDeductible = Boolean(updates.taxDeductible);
       if (updates.notes !== undefined) clean.notes = updates.notes.slice(0, 2000);
       if (updates.linkedDocumentId !== undefined)
@@ -1762,6 +1829,7 @@ function MainApp() {
         title,
         type: t.type === 'appointment' ? 'appointment' : 'task',
         category: safeCategory(t.category),
+        place: isPlaceName(t.place) ? t.place : '',
         dueDate,
         dueTime: typeof t.dueTime === 'string' ? t.dueTime : '',
         estimatedMinutes: Number(t.estimatedMinutes) || 30,
@@ -1782,6 +1850,7 @@ function MainApp() {
       await handleSaveDocument({
         title,
         category: safeCategory(d.category),
+        place: isPlaceName(d.place) ? d.place : '',
         ocrText: typeof d.ocrText === 'string' ? d.ocrText : '',
         summary: typeof d.summary === 'string' ? d.summary : '',
         tags: Array.isArray(d.tags) ? d.tags.map(String) : [],
@@ -1822,6 +1891,7 @@ function MainApp() {
           : 'once';
       await handleCreatePropertyEntry({
         area,
+        place: isPlaceName(p.place) ? p.place : '',
         title,
         status,
         scheduledDate,
@@ -1844,13 +1914,13 @@ function MainApp() {
       const key = `${title.toLowerCase()}|${entryDate}|${amount.toFixed(2)}`;
       if (!title || existingFinKeys.has(key)) continue;
       existingFinKeys.add(key);
-      const propertyScope =
-        f.propertyScope === 'general' ||
-        f.propertyScope === 'home' ||
-        f.propertyScope === 'wimberley_conservancy' ||
-        f.propertyScope === 'wimberley_cabin'
-          ? f.propertyScope
-          : 'general';
+      const legacyScopePlaces: Record<string, string> = {
+        wimberley_conservancy: 'Riva Jade — Wildlife Conservancy',
+        wimberley_cabin: 'Riva Jade — Rental Cabin',
+      };
+      const place = isPlaceName(f.place)
+        ? f.place
+        : legacyScopePlaces[String((f as unknown as { propertyScope?: string }).propertyScope || '')] || '';
       await handleCreateFinanceEntry({
         kind: f.kind === 'income' ? 'income' : 'expense',
         group: String(f.group || 'General').trim() || 'General',
@@ -1858,7 +1928,8 @@ function MainApp() {
         amount,
         entryDate,
         vendor: typeof f.vendor === 'string' ? f.vendor : '',
-        propertyScope,
+        place,
+        careForJason: Boolean(f.careForJason),
         taxDeductible: Boolean(f.taxDeductible),
         notes: typeof f.notes === 'string' ? f.notes : '',
         linkedDocumentId: typeof f.linkedDocumentId === 'string' ? f.linkedDocumentId : '',
@@ -2023,6 +2094,28 @@ function MainApp() {
                 </p>
               ))}
           </div>
+          <div className="px-2">
+            <label
+              className="text-[11px] font-medium text-slate-500 dark:text-slate-400"
+              htmlFor="sidebar-place"
+            >
+              Place
+            </label>
+            <select
+              id="sidebar-place"
+              value={selectedPlace}
+              onChange={(e) => switchPlace(e.target.value)}
+              aria-label="Show one place"
+              className="mt-1 w-full text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-2 py-1.5 text-slate-700 dark:text-slate-200"
+            >
+              {PLACE_FILTERS.map((f) => (
+                <option key={f.value} value={f.value}>
+                  {f.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
 
           <nav className="space-y-1">
             {navItems.map((item) => {
@@ -2228,9 +2321,9 @@ function MainApp() {
           {activeTab === 'schedule' && (
             <ScheduleAndCalendarView
               userProfile={userProfile}
-              tasks={visibleTasks}
+              tasks={displayTasks}
               sharedTasks={sharedTasksWithProject}
-              documents={visibleDocuments}
+              documents={displayDocuments}
               onCreateTask={handleCreateTask}
               onUpdateTask={handleUpdateTask}
               onToggleTaskComplete={handleToggleTaskComplete}
@@ -2243,9 +2336,9 @@ function MainApp() {
 
           {activeTab === 'property' && (
             <WimberleyPropertyView
-              entries={visiblePropertyEntries}
-              documents={visibleDocuments}
-              propertyTasks={visibleTasks.filter((t) => t.category === 'Wimberley Property')}
+              entries={displayPropertyEntries}
+              documents={displayDocuments}
+              propertyTasks={displayTasks.filter((t) => t.category === 'Wimberley Property')}
               onCreateEntry={handleCreatePropertyEntry}
               onUpdateEntry={handleUpdatePropertyEntry}
               onDeleteEntry={handleDeletePropertyEntry}
@@ -2256,8 +2349,8 @@ function MainApp() {
 
           {activeTab === 'finances' && (
             <FinancesView
-              entries={visibleFinanceEntries}
-              documents={visibleDocuments}
+              entries={displayFinanceEntries}
+              documents={displayDocuments}
               onCreateEntry={handleCreateFinanceEntry}
               onUpdateEntry={handleUpdateFinanceEntry}
               onDeleteEntry={handleDeleteFinanceEntry}
@@ -2266,7 +2359,7 @@ function MainApp() {
 
           {activeTab === 'vault' && (
             <DocumentScannerVaultView
-              documents={visibleDocuments}
+              documents={displayDocuments}
               onSaveDocument={handleSaveDocument}
               onUpdateDocument={handleUpdateDocument}
               onVerifyDocument={handleVerifyDocument}
@@ -2300,11 +2393,11 @@ function MainApp() {
           {activeTab === 'voice' && (
             <GeminiLiveVoiceView
               userName={userProfile?.displayName || user.displayName || 'User'}
-              tasks={visibleTasks}
-              documents={visibleDocuments}
+              tasks={displayTasks}
+              documents={displayDocuments}
               memories={voiceMemories}
-              propertyEntries={visiblePropertyEntries}
-              financeEntries={visibleFinanceEntries}
+              propertyEntries={displayPropertyEntries}
+              financeEntries={displayFinanceEntries}
               onCreateTask={handleCreateTask}
               onCompleteTaskByTitle={handleCompleteTaskByTitle}
               onSaveMemory={handleSaveVoiceMemory}
@@ -2315,8 +2408,8 @@ function MainApp() {
 
           {activeTab === 'analytics' && (
             <AnalyticsDashboardView
-              tasks={visibleTasks}
-              documents={visibleDocuments}
+              tasks={displayTasks}
+              documents={displayDocuments}
               projects={projects}
               sharedTasks={sharedTasksWithProject}
               onNavigate={setActiveTab}
@@ -2530,6 +2623,31 @@ function MainApp() {
                       ))}
                     </div>
                   )}
+                  <div className="space-y-1.5 pt-1">
+                    <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                      Place
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      The trunk is Mom, and the desk grows in two main branches. Texas
+                      holds Riva Jade — the homestead, its rental cabin, and the wildlife
+                      conservancy. Louisiana holds Oakleaf (Jason's place, Mom's in
+                      reserve) and Elephant Walk (Derek and Dawn's). Each record can be
+                      marked with its place; pick one branch here and every list shows
+                      just what's under it. All places is the master copy of everything.
+                    </p>
+                    <select
+                      value={selectedPlace}
+                      onChange={(e) => switchPlace(e.target.value)}
+                      aria-label="Show one place"
+                      className="w-full min-h-[42px] px-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                    >
+                      {PLACE_FILTERS.map((f) => (
+                        <option key={f.value} value={f.value}>
+                          {f.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                   <form onSubmit={handleCreateHousehold} className="space-y-2 pt-1">
                     <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
                       Start another household

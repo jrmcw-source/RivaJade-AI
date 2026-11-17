@@ -216,6 +216,7 @@ service cloud.firestore {
           'notes',
           'helpSteps',
           'linkedDocumentId',
+          'place',
           'completedAtIso',
           'createdAt',
           'updatedAt'
@@ -249,6 +250,8 @@ service cloud.firestore {
         && data.notes.size() <= 2000
         && isBoundedStringList(data.helpSteps, 15, 400)
         && data.linkedDocumentId is string
+        && data.get('place', '') is string
+        && data.get('place', '').size() <= 60
         && data.linkedDocumentId.size() <= 128
         && data.completedAtIso is string
         && data.completedAtIso.size() <= 40
@@ -297,6 +300,7 @@ service cloud.firestore {
           'verifiedAtIso',
           'driveFileId',
           'paperLocation',
+          'place',
           'createdAt',
           'updatedAt'
         ])
@@ -334,6 +338,8 @@ service cloud.firestore {
         && data.paperLocation is string
         && data.paperLocation.size() <= 200
         && data.get('driveFileId', '') is string
+        && data.get('place', '') is string
+        && data.get('place', '').size() <= 60
         && data.get('driveFileId', '').size() <= 128
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -638,6 +644,7 @@ service cloud.firestore {
           'inspectorOrGuest',
           'notes',
           'linkedDocumentId',
+          'place',
           'createdAt',
           'updatedAt'
         ])
@@ -664,6 +671,8 @@ service cloud.firestore {
         && data.notes is string
         && data.notes.size() <= 2000
         && data.linkedDocumentId is string
+        && data.get('place', '') is string
+        && data.get('place', '').size() <= 60
         && data.linkedDocumentId.size() <= 128
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -680,7 +689,6 @@ service cloud.firestore {
           'amount',
           'entryDate',
           'vendor',
-          'propertyScope',
           'taxDeductible',
           'notes',
           'linkedDocumentId',
@@ -701,6 +709,8 @@ service cloud.firestore {
           'taxDeductible',
           'notes',
           'linkedDocumentId',
+          'place',
+          'careForJason',
           'createdAt',
           'updatedAt'
         ])
@@ -726,11 +736,14 @@ service cloud.firestore {
         && data.entryDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         && data.vendor is string
         && data.vendor.size() <= 120
-        && data.propertyScope in ['general', 'home', 'wimberley_conservancy', 'wimberley_cabin']
+        && data.get('propertyScope', 'general') in ['general', 'home', 'wimberley_conservancy', 'wimberley_cabin']
         && data.taxDeductible is bool
         && data.notes is string
         && data.notes.size() <= 2000
         && data.linkedDocumentId is string
+        && data.get('place', '') is string
+        && data.get('place', '').size() <= 60
+        && data.get('careForJason', false) is bool
         && data.linkedDocumentId.size() <= 128
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -924,6 +937,7 @@ service cloud.firestore {
               'notes',
               'helpSteps',
               'linkedDocumentId',
+              'place',
               'householdId',
               'memberIds',
               'updatedAt'
@@ -985,6 +999,7 @@ service cloud.firestore {
           'verifiedByName',
           'verifiedAtIso',
           'driveFileId',
+          'place',
           'paperLocation',
           'householdId',
           'memberIds',
@@ -1322,6 +1337,7 @@ service cloud.firestore {
           'inspectorOrGuest',
           'notes',
           'linkedDocumentId',
+          'place',
           'householdId',
           'memberIds',
           'updatedAt'
@@ -1362,6 +1378,8 @@ service cloud.firestore {
           'entryDate',
           'vendor',
           'propertyScope',
+          'place',
+          'careForJason',
           'taxDeductible',
           'notes',
           'linkedDocumentId',

@@ -228,7 +228,7 @@ export function buildFinancesCsvBackup(entries: FinanceEntry[]): string {
     'Title',
     'Amount',
     'Vendor',
-    'Scope',
+    'Place',
     'Tax Deductible',
     'Notes',
   ];
@@ -241,7 +241,7 @@ export function buildFinancesCsvBackup(entries: FinanceEntry[]): string {
       item.title,
       item.amount.toFixed(2),
       item.vendor,
-      item.propertyScope,
+      (item.place || '') + (item.careForJason ? " — Jason's care" : ''),
       item.taxDeductible ? 'Yes' : 'No',
       item.notes.replace(/\n/g, ' '),
     ]);

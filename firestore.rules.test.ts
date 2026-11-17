@@ -155,4 +155,20 @@ export const DIRTY_DOZEN_PAYLOADS = [
     data: { userId: 'u1', driveFileId: 12345 },
     expected: 'PERMISSION_DENIED',
   },
+  {
+    name: '20. Task with an oversized place tag',
+    auth: { uid: 'u1', token: { email_verified: true } },
+    operation: 'create',
+    path: '/tasks/t_big_place',
+    data: { userId: 'u1', place: 'x'.repeat(61) },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '21. Finance entry with a non-boolean care flag',
+    auth: { uid: 'u1', token: { email_verified: true } },
+    operation: 'create',
+    path: '/financeEntries/f_bad_care',
+    data: { userId: 'u1', careForJason: 'yes' },
+    expected: 'PERMISSION_DENIED',
+  },
 ];

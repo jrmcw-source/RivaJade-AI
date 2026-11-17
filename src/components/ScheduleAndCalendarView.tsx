@@ -22,6 +22,7 @@ import {
 import {
   AIPriorityPlan,
   CATEGORIES,
+  PLACES,
   Category,
   FocusWindow,
   ProjectTask,
@@ -81,6 +82,7 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
   const [formTitle, setFormTitle] = useState('');
   const [formType, setFormType] = useState<TaskType>('task');
   const [formCategory, setFormCategory] = useState<Category>('Household');
+  const [formPlace, setFormPlace] = useState('');
   const [formDueDate, setFormDueDate] = useState(todayIso);
   const [formDueTime, setFormDueTime] = useState('');
   const [formEstimatedMinutes, setFormEstimatedMinutes] = useState(30);
@@ -111,6 +113,7 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
     setFormTitle('');
     setFormType('task');
     setFormCategory('Household');
+    setFormPlace('');
     setFormDueDate(defaultDate);
     setFormDueTime('');
     setFormEstimatedMinutes(30);
@@ -126,6 +129,7 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
     setFormTitle(task.title);
     setFormType(task.type);
     setFormCategory(task.category);
+    setFormPlace(task.place || '');
     setFormDueDate(task.dueDate);
     setFormDueTime(task.dueTime);
     setFormEstimatedMinutes(task.estimatedMinutes);
@@ -146,6 +150,7 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
           title: formTitle.trim(),
           type: formType,
           category: formCategory,
+          place: formPlace,
           dueDate: formDueDate,
           dueTime: formDueTime,
           estimatedMinutes: Number(formEstimatedMinutes) || 30,
@@ -159,6 +164,7 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
           title: formTitle.trim(),
           type: formType,
           category: formCategory,
+          place: formPlace,
           dueDate: formDueDate,
           dueTime: formDueTime,
           estimatedMinutes: Number(formEstimatedMinutes) || 30,
@@ -645,7 +651,7 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
 
                           {/* Zero-pill inline metadata */}
                           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400 tabular-nums">
-                            <span>{task.category}</span>
+                            <span>{task.category}{task.place ? ` · ${task.place}` : ''}</span>
                             <span aria-hidden="true">·</span>
                             <span className="capitalize">{task.type}</span>
                             <span aria-hidden="true">·</span>
@@ -1019,6 +1025,24 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
                   ))}
                 </select>
               </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                Place
+              </label>
+              <select
+                value={formPlace}
+                onChange={(e) => setFormPlace(e.target.value)}
+                className="w-full min-h-[44px] px-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+              >
+                <option value="">General — no place</option>
+                {PLACES.map((pl) => (
+                  <option key={pl} value={pl}>
+                    {pl}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="grid grid-cols-2 gap-3">

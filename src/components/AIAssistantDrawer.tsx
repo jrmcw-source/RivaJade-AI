@@ -17,7 +17,8 @@ import {
   Category,
   FinanceEntry,
   FinanceKind,
-  FinancePropertyScope,
+  PLACES,
+  isPlaceName,
   PropertyCadence,
   PropertyEntry,
   PropertyEntryArea,
@@ -119,13 +120,6 @@ const VALID_PROPERTY_CADENCES: readonly PropertyCadence[] = [
   'quarterly',
   'seasonal',
   'annual',
-];
-
-const VALID_FINANCE_SCOPES: readonly FinancePropertyScope[] = [
-  'general',
-  'home',
-  'wimberley_conservancy',
-  'wimberley_cabin',
 ];
 
 function safeIsoDate(raw: unknown): string {
@@ -320,16 +314,12 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
           priority,
           notes: typeof payload.notes === 'string' ? payload.notes.slice(0, 2000) : '',
           helpSteps: [],
+          place: isPlaceName(payload.place) ? payload.place : '',
           linkedDocumentId: '',
         });
       } else if (action.type === 'log_expense') {
         const kind: FinanceKind = payload.kind === 'income' ? 'income' : 'expense';
-        const rawScope = String(payload.propertyScope || 'general');
-        const propertyScope: FinancePropertyScope = (
-          VALID_FINANCE_SCOPES as readonly string[]
-        ).includes(rawScope)
-          ? (rawScope as FinancePropertyScope)
-          : 'general';
+        const place = isPlaceName(payload.place) ? payload.place : '';
 
         await onLogFinanceEntry({
           kind,
@@ -338,7 +328,8 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
           amount: Math.max(0, Math.min(10000000, Number(payload.amount) || 0)),
           entryDate: safeIsoDate(payload.entryDate),
           vendor: typeof payload.vendor === 'string' ? payload.vendor.slice(0, 120) : '',
-          propertyScope,
+          place,
+          careForJason: Boolean(payload.careForJason),
           taxDeductible: Boolean(payload.taxDeductible),
           notes: typeof payload.notes === 'string' ? payload.notes.slice(0, 2000) : '',
           linkedDocumentId: '',
@@ -375,6 +366,11 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
               ? payload.inspectorOrGuest.slice(0, 120)
               : '',
           notes: typeof payload.notes === 'string' ? payload.notes.slice(0, 2000) : '',
+          place: isPlaceName(payload.place)
+            ? payload.place
+            : area === 'conservancy'
+              ? 'Riva Jade — Wildlife Conservancy'
+              : 'Riva Jade — Rental Cabin',
           linkedDocumentId: '',
         });
       } else if (action.type === 'open_drive_backup') {

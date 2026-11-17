@@ -26,6 +26,27 @@ their own phone or computer.
 - When someone joins, existing household records pick up the new member
   automatically.
 
+## Places — the tree
+
+The desk is Mom's — she is the trunk. Two main branches:
+
+- **Texas** — **Riva Jade**, one property (5151 Wayside Dr, Wimberley): the
+  **Homestead** (the main house, Mom's official residence), the **Rental
+  Cabin** under the homestead, and the **Wildlife Conservancy** — the rest
+  of the land, under its wildlife exemption. Each keeps its own expenses,
+  upkeep, and tax treatment (Texas law).
+- **Louisiana** — **Oakleaf**, the Lafayette house (Jason's place, Mom's in
+  reserve), and **Elephant Walk**, Derek and Dawn's place in Carencro,
+  where Mom helps with some bills.
+
+Every task, document, finance entry, and property entry can be marked with
+its place, or left general. Pick a branch in the sidebar or in Settings and
+every list shows just what's under it — Riva Jade shows the whole property,
+the Homestead shows the homestead and the cabin under it. **All places** is
+the master copy of everything. Money entries can also be flagged **For
+Jason's care** — the expenses of looking after Jason at Oakleaf, kept
+tracked apart.
+
 ## Documents: checked against the paper
 
 A scanned document starts out **provisional** — its words came from a

@@ -15,7 +15,8 @@ import {
   CATEGORIES,
   FinanceEntry,
   FinanceKind,
-  FinancePropertyScope,
+  PLACES,
+  isPlaceName,
   PropertyEntry,
   ScannedDocument,
   ScheduleTask,
@@ -232,6 +233,7 @@ export const GeminiLiveVoiceView: React.FC<GeminiLiveVoiceViewProps> = ({
           priority: args.priority || 'medium',
           notes: args.notes || 'Created during Gemini Live voice conversation',
           helpSteps: [],
+          place: '',
           linkedDocumentId: '',
         });
         appendTranscript('system', `Added "${args.title}" for ${dueDate} (${cat}).`);
@@ -290,7 +292,7 @@ export const GeminiLiveVoiceView: React.FC<GeminiLiveVoiceViewProps> = ({
           kind?: FinanceKind;
           vendor?: string;
           entryDate?: string;
-          propertyScope?: FinancePropertyScope;
+          place?: string;
           taxDeductible?: boolean;
         };
         const amount = Number(args.amount) || 0;
@@ -307,7 +309,8 @@ export const GeminiLiveVoiceView: React.FC<GeminiLiveVoiceViewProps> = ({
           amount: Math.max(0, Math.min(10000000, amount)),
           entryDate,
           vendor: String(args.vendor || '').slice(0, 120),
-          propertyScope: args.propertyScope || 'general',
+          place: isPlaceName(args.place) ? args.place : '',
+          careForJason: false,
           taxDeductible: Boolean(args.taxDeductible),
           notes: 'Logged during Gemini Live voice conversation',
           linkedDocumentId: '',
@@ -760,6 +763,7 @@ export const GeminiLiveVoiceView: React.FC<GeminiLiveVoiceViewProps> = ({
                                   priority: 'medium',
                                   notes: `Follow-up from voice session: ${mem.summary}`,
                                   helpSteps: [],
+                                  place: '',
                                   linkedDocumentId: '',
                                 })
                               }

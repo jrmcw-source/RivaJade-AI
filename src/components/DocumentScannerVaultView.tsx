@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import {
   CATEGORIES,
+  PLACES,
   Category,
   ScannedDocument,
   ScheduleTask,
@@ -132,6 +133,7 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
     selectedTaskIndices: Record<number, boolean>;
     notes: string;
     paperLocation: string;
+    place: string;
   } | null>(null);
   const [newTagInput, setNewTagInput] = useState('');
   const [savingDoc, setSavingDoc] = useState(false);
@@ -139,6 +141,7 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
   // Inspector edit state
   const [editTagInput, setEditTagInput] = useState('');
   const [paperLocationInput, setPaperLocationInput] = useState('');
+  const [placeInput, setPlaceInput] = useState('');
   const [editingOcrText, setEditingOcrText] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -313,6 +316,7 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
         selectedTaskIndices: selectedMap,
         notes: '',
         paperLocation: '',
+        place: '',
       });
     } catch (err) {
       setOcrError(err instanceof Error ? err.message : 'OCR extraction failed.');
@@ -338,6 +342,7 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
         fileName: rawImageFileName,
         notes: draftResult.notes,
         paperLocation: draftResult.paperLocation,
+        place: draftResult.place,
       });
 
       // Schedule checked suggested tasks linked to this document
@@ -353,6 +358,7 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
             title: st.title,
             type: 'task',
             category: draftResult.category,
+            place: draftResult.place,
             dueDate: validDate,
             dueTime: '',
             estimatedMinutes: st.estimatedMinutes || 30,
@@ -412,6 +418,7 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
 
   useEffect(() => {
     setPaperLocationInput(selectedDoc?.paperLocation || '');
+    setPlaceInput(selectedDoc?.place || '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDocId]);
 
@@ -559,6 +566,12 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
                       </h3>
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-slate-500 dark:text-slate-400 tabular-nums">
                         <span>{docItem.category}</span>
+                        {docItem.place && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span>{docItem.place}</span>
+                          </>
+                        )}
                         {docItem.detectedDate && (
                           <>
                             <span aria-hidden="true">·</span>
@@ -688,11 +701,27 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
                   </button>
                 </div>
               )}
+              <div className="flex gap-2">
+                <select
+                  value={placeInput}
+                  onChange={(e) => setPlaceInput(e.target.value)}
+                  aria-label="Place for this document"
+                  className="flex-1 min-h-[40px] px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                >
+                  <option value="">General — no place</option>
+                  {PLACES.map((pl) => (
+                    <option key={pl} value={pl}>
+                      {pl}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
                   void onUpdateDocument(selectedDoc.id, {
                     paperLocation: paperLocationInput.trim(),
+                    place: placeInput,
                   });
                 }}
                 className="flex gap-2"
@@ -845,7 +874,8 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
                     priority: 'medium',
                     notes: selectedDoc.summary,
                     helpSteps: [],
-                    linkedDocumentId: selectedDoc.id,
+                    place: selectedDoc.place || '',
+            linkedDocumentId: selectedDoc.id,
                   });
                 }}
                 className="min-h-[44px] inline-flex items-center gap-2 px-3.5 py-2 text-xs font-medium text-teal-800 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/50 hover:bg-teal-100 dark:hover:bg-teal-900/50 rounded-lg transition-colors"
@@ -1122,6 +1152,24 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
                     This scan starts out unchecked. It earns its check mark later, when someone
                     compares it against the paper itself.
                   </p>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                    Which place does this paper belong to?
+                  </label>
+                  <select
+                    value={draftResult.place}
+                    onChange={(e) => setDraftResult({ ...draftResult, place: e.target.value })}
+                    className="w-full min-h-[42px] px-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                  >
+                    <option value="">General — no place</option>
+                    {PLACES.map((pl) => (
+                      <option key={pl} value={pl}>
+                        {pl}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div className="space-y-1">

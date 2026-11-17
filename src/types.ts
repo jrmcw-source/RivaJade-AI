@@ -12,6 +12,66 @@ export const CATEGORIES = [
 ] as const;
 
 export type Category = (typeof CATEGORIES)[number];
+
+// The family's places, as a tree. The trunk is Mom — officially Texas —
+// and everything on the desk is hers. Two main branches: Texas and
+// Louisiana. Texas holds Riva Jade: the homestead (with its own branch,
+// the rental cabin) and the wildlife conservancy. Louisiana holds
+// Oakleaf — the Lafayette house, Jason's place, with Mom in reserve —
+// and Elephant Walk, Derek and Dawn's place in Carencro. A record's
+// `place` is one of these names, or '' when it belongs to the desk
+// generally.
+export const PLACES = [
+  'Riva Jade',
+  'Riva Jade — Homestead',
+  'Riva Jade — Rental Cabin',
+  'Riva Jade — Wildlife Conservancy',
+  'Oakleaf',
+  'Elephant Walk',
+] as const;
+export type PlaceName = (typeof PLACES)[number];
+
+// Extra values the place filter accepts that are not record tags:
+// 'Louisiana' gathers both Louisiana branches; '' shows everything.
+export const PLACE_FILTERS: Array<{ value: string; label: string }> = [
+  { value: '', label: "All places — Mom's whole desk" },
+  { value: 'Texas', label: 'Texas (all of Riva Jade)' },
+  { value: 'Riva Jade', label: 'Riva Jade (the whole property)' },
+  { value: 'Riva Jade — Homestead', label: 'Riva Jade — Homestead (incl. the cabin)' },
+  { value: 'Riva Jade — Rental Cabin', label: 'Riva Jade — Rental Cabin' },
+  { value: 'Riva Jade — Wildlife Conservancy', label: 'Riva Jade — Wildlife Conservancy' },
+  { value: 'Louisiana', label: 'Louisiana (Oakleaf + Elephant Walk)' },
+  { value: 'Oakleaf', label: 'Oakleaf' },
+  { value: 'Elephant Walk', label: 'Elephant Walk' },
+];
+
+const PLACE_CHILDREN: Record<string, readonly string[]> = {
+  Texas: [
+    'Riva Jade',
+    'Riva Jade — Homestead',
+    'Riva Jade — Rental Cabin',
+    'Riva Jade — Wildlife Conservancy',
+  ],
+  'Riva Jade': [
+    'Riva Jade — Homestead',
+    'Riva Jade — Rental Cabin',
+    'Riva Jade — Wildlife Conservancy',
+  ],
+  'Riva Jade — Homestead': ['Riva Jade — Rental Cabin'],
+  Louisiana: ['Oakleaf', 'Elephant Walk'],
+};
+
+// Does a record tagged `recordPlace` belong under the `filter` branch?
+// A branch includes everything that grows under it.
+export function placeMatches(recordPlace: string, filter: string): boolean {
+  if (!filter) return true;
+  if (recordPlace === filter) return true;
+  return (PLACE_CHILDREN[filter] || []).includes(recordPlace);
+}
+
+export function isPlaceName(value: unknown): value is PlaceName {
+  return typeof value === 'string' && (PLACES as readonly string[]).includes(value);
+}
 export type TaskType = 'task' | 'appointment';
 export type TaskPriority = 'low' | 'medium' | 'high';
 export type TaskStatus = 'pending' | 'completed';
@@ -39,6 +99,7 @@ export interface ScheduleTask {
   title: string;
   type: TaskType;
   category: Category;
+  place: string;
   dueDate: string; // YYYY-MM-DD
   dueTime: string; // HH:MM or ''
   estimatedMinutes: number;
@@ -62,6 +123,7 @@ export interface ScannedDocument {
   memberIds: string[];
   title: string;
   category: Category;
+  place: string;
   ocrText: string;
   summary: string;
   tags: string[];
@@ -220,6 +282,7 @@ export interface PropertyEntry {
   householdId: string;
   memberIds: string[];
   area: PropertyEntryArea;
+  place: string;
   title: string;
   status: PropertyEntryStatus;
   scheduledDate: string; // YYYY-MM-DD
@@ -276,11 +339,8 @@ export interface PropertyAdvisoryPlan {
 }
 
 export type FinanceKind = 'expense' | 'income';
-export type FinancePropertyScope =
-  | 'general'
-  | 'home'
-  | 'wimberley_conservancy'
-  | 'wimberley_cabin';
+// Finance entries used to carry their own scope list; they now use the
+// shared place tree (PLACES above), like every other record.
 
 export const DEFAULT_EXPENDITURE_GROUPS = [
   'Conservancy',
@@ -308,8 +368,9 @@ export interface FinanceEntry {
   amount: number;
   entryDate: string; // YYYY-MM-DD
   vendor: string;
-  propertyScope: FinancePropertyScope;
   taxDeductible: boolean;
+  place: string;
+  careForJason: boolean;
   notes: string;
   linkedDocumentId: string;
   createdAt?: unknown;

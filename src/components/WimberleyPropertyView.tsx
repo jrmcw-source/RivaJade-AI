@@ -25,6 +25,7 @@ import {
   ScheduleTask,
   WimberleyWeatherData,
   getLocalTodayIso,
+  PLACES,
 } from '../types';
 
 interface WimberleyPropertyViewProps {
@@ -103,6 +104,7 @@ export const WimberleyPropertyView: React.FC<WimberleyPropertyViewProps> = ({
   const [modalOpen, setModalOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<PropertyEntry | null>(null);
   const [area, setArea] = useState<PropertyEntryArea>('conservancy');
+  const [place, setPlace] = useState('Riva Jade — Wildlife Conservancy');
   const [title, setTitle] = useState('');
   const [status, setStatus] = useState<PropertyEntryStatus>('nominal');
   const [scheduledDate, setScheduledDate] = useState(getLocalTodayIso());
@@ -164,6 +166,7 @@ export const WimberleyPropertyView: React.FC<WimberleyPropertyViewProps> = ({
 
   function openNewModal(defaultArea: PropertyEntryArea = 'conservancy') {
     setEditingEntry(null);
+    setPlace(defaultArea === 'conservancy' ? 'Riva Jade — Wildlife Conservancy' : 'Riva Jade — Rental Cabin');
     setArea(defaultArea);
     setTitle('');
     setStatus(defaultArea === 'cabin_stay' ? 'upcoming' : 'nominal');
@@ -179,6 +182,7 @@ export const WimberleyPropertyView: React.FC<WimberleyPropertyViewProps> = ({
   function openEditModal(entry: PropertyEntry) {
     setEditingEntry(entry);
     setArea(entry.area);
+    setPlace(entry.place || '');
     setTitle(entry.title);
     setStatus(entry.status);
     setScheduledDate(entry.scheduledDate);
@@ -197,6 +201,7 @@ export const WimberleyPropertyView: React.FC<WimberleyPropertyViewProps> = ({
     try {
       const payload = {
         area,
+        place,
         title: title.trim().slice(0, 200),
         status,
         scheduledDate: scheduledDate || getLocalTodayIso(),
@@ -227,6 +232,7 @@ export const WimberleyPropertyView: React.FC<WimberleyPropertyViewProps> = ({
     const starters: Array<Omit<PropertyEntry, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'householdId' | 'memberIds'>> = [
       {
         area: 'conservancy',
+        place: 'Riva Jade — Wildlife Conservancy',
         title: 'Oak Wilt Season Compliance & Canopy Inspection',
         status: 'nominal',
         scheduledDate: today,
@@ -239,6 +245,7 @@ export const WimberleyPropertyView: React.FC<WimberleyPropertyViewProps> = ({
       },
       {
         area: 'conservancy',
+        place: 'Riva Jade — Wildlife Conservancy',
         title: 'Rainwater Cistern, First-Flush & Creek Erosion Walk',
         status: 'attention',
         scheduledDate: today,
@@ -251,6 +258,7 @@ export const WimberleyPropertyView: React.FC<WimberleyPropertyViewProps> = ({
       },
       {
         area: 'conservancy',
+        place: 'Riva Jade — Wildlife Conservancy',
         title: 'Hays County Wildlife Valuation & Cedar Management Log',
         status: 'upcoming',
         scheduledDate: today,
@@ -263,6 +271,7 @@ export const WimberleyPropertyView: React.FC<WimberleyPropertyViewProps> = ({
       },
       {
         area: 'cabin_maintenance',
+        place: 'Riva Jade — Rental Cabin',
         title: 'Rental Cabin Septic / Aerobic System & Well Filter Check',
         status: 'attention',
         scheduledDate: today,
@@ -275,6 +284,7 @@ export const WimberleyPropertyView: React.FC<WimberleyPropertyViewProps> = ({
       },
       {
         area: 'cabin_maintenance',
+        place: 'Riva Jade — Rental Cabin',
         title: 'Cabin Turnover Readiness: HVAC Filters, Propane & Smart Lock',
         status: 'ready',
         scheduledDate: today,
@@ -350,6 +360,7 @@ export const WimberleyPropertyView: React.FC<WimberleyPropertyViewProps> = ({
       title: isStay ? `Cabin Turnover: ${entry.title}` : `Wimberley: ${entry.title}`,
       type: isStay ? 'appointment' : 'task',
       category: 'Wimberley Property',
+      place: entry.place || '',
       dueDate: entry.scheduledDate,
       dueTime: isStay ? '11:00' : '09:00',
       estimatedMinutes: isStay ? 90 : 60,
@@ -614,6 +625,10 @@ export const WimberleyPropertyView: React.FC<WimberleyPropertyViewProps> = ({
                     onClick={async () => {
                       await onCreateEntry({
                         area: rec.area,
+                        place:
+                          rec.area === 'conservancy'
+                            ? 'Riva Jade — Wildlife Conservancy'
+                            : 'Riva Jade — Rental Cabin',
                         title: rec.title.slice(0, 200),
                         status: rec.priority === 'high' ? 'attention' : 'upcoming',
                         scheduledDate:
@@ -733,6 +748,7 @@ export const WimberleyPropertyView: React.FC<WimberleyPropertyViewProps> = ({
                           {AREA_LABELS[entry.area]}
                           {' · '}
                           {CADENCE_LABELS[entry.cadence]}
+                          {entry.place ? ` · ${entry.place}` : ''}
                           {' · '}
                           {entry.scheduledDate}
                           {entry.endDate ? ` → ${entry.endDate}` : ''}
@@ -931,6 +947,24 @@ export const WimberleyPropertyView: React.FC<WimberleyPropertyViewProps> = ({
                   <option value="conservancy">Conservancy Stewardship</option>
                   <option value="cabin_maintenance">Rental Cabin Maintenance</option>
                   <option value="cabin_stay">Rental Cabin Stay / Turnover</option>
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                  Place
+                </label>
+                <select
+                  value={place}
+                  onChange={(e) => setPlace(e.target.value)}
+                  className="w-full min-h-[42px] px-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                >
+                  <option value="">General — no place</option>
+                  {PLACES.map((pl) => (
+                    <option key={pl} value={pl}>
+                      {pl}
+                    </option>
+                  ))}
                 </select>
               </div>
 

@@ -14,7 +14,8 @@ import {
   DEFAULT_EXPENDITURE_GROUPS,
   FinanceEntry,
   FinanceKind,
-  FinancePropertyScope,
+  PLACES,
+  placeMatches,
   ScannedDocument,
   getLocalTodayIso,
 } from '../types';
@@ -29,12 +30,6 @@ interface FinancesViewProps {
   onDeleteEntry: (entryId: string) => Promise<void>;
 }
 
-const SCOPE_LABELS: Record<FinancePropertyScope, string> = {
-  general: 'General Household',
-  home: 'Primary Home',
-  wimberley_conservancy: 'Wimberley Conservancy',
-  wimberley_cabin: 'Wimberley Rental Cabin',
-};
 
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat('en-US', {
@@ -95,7 +90,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   onDeleteEntry,
 }) => {
   const [timeframe, setTimeframe] = useState<'month' | '90d' | 'year' | 'all'>('month');
-  const [scopeFilter, setScopeFilter] = useState<'all' | FinancePropertyScope>('all');
+  const [scopeFilter, setScopeFilter] = useState<string>('all');
   const [selectedGroup, setSelectedGroup] = useState<string>('ALL');
   const [groupViewMode, setGroupViewMode] = useState<'exact' | 'rollup'>('exact');
   const [searchQuery, setSearchQuery] = useState('');
@@ -110,7 +105,8 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   const [amountStr, setAmountStr] = useState('');
   const [entryDate, setEntryDate] = useState(getLocalTodayIso());
   const [vendor, setVendor] = useState('');
-  const [propertyScope, setPropertyScope] = useState<FinancePropertyScope>('general');
+  const [place, setPlace] = useState('');
+  const [careForJason, setCareForJason] = useState(false);
   const [taxDeductible, setTaxDeductible] = useState(false);
   const [notes, setNotes] = useState('');
   const [linkedDocumentId, setLinkedDocumentId] = useState('');
@@ -133,7 +129,11 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     const ninetyDaysAgo = new Date(nowMs - 90 * 86400000).toISOString().slice(0, 10);
 
     return entries.filter((e) => {
-      if (scopeFilter !== 'all' && e.propertyScope !== scopeFilter) return false;
+      if (scopeFilter === 'general') {
+        if ((e.place || '') !== '') return false;
+      } else if (scopeFilter !== 'all' && !placeMatches(e.place || '', scopeFilter)) {
+        return false;
+      }
       if (timeframe === 'month') return e.entryDate.startsWith(currentMonthPrefix);
       if (timeframe === '90d') return e.entryDate >= ninetyDaysAgo;
       if (timeframe === 'year') return e.entryDate.startsWith(currentYearPrefix);
@@ -203,15 +203,14 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     setAmountStr('');
     setEntryDate(getLocalTodayIso());
     setVendor('');
-    setPropertyScope(
+    setPlace(
       defaultGroup === 'Conservancy'
-        ? 'wimberley_conservancy'
+        ? 'Riva Jade — Wildlife Conservancy'
         : defaultGroup === 'Rental Upkeep' || defaultGroup === 'Rental Income'
-        ? 'wimberley_cabin'
-        : defaultGroup === 'Home Repairs'
-        ? 'home'
-        : 'general'
+          ? 'Riva Jade — Rental Cabin'
+          : ''
     );
+    setCareForJason(false);
     setTaxDeductible(
       defaultGroup === 'Conservancy' ||
         defaultGroup === 'Rental Upkeep' ||
@@ -236,7 +235,8 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     setAmountStr(String(entry.amount));
     setEntryDate(entry.entryDate);
     setVendor(entry.vendor);
-    setPropertyScope(entry.propertyScope);
+    setPlace(entry.place || '');
+    setCareForJason(entry.careForJason);
     setTaxDeductible(entry.taxDeductible);
     setNotes(entry.notes);
     setLinkedDocumentId(entry.linkedDocumentId);
@@ -280,7 +280,8 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         amount: Math.min(10000000, Math.round(amount * 100) / 100),
         entryDate: entryDate || getLocalTodayIso(),
         vendor: vendor.trim().slice(0, 120),
-        propertyScope,
+        place,
+        careForJason,
         taxDeductible,
         notes: notes.trim().slice(0, 2000),
         linkedDocumentId: linkedDocumentId || '',
@@ -300,7 +301,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   }
 
   function handleExportCsv() {
-    const header = ['Date', 'Kind', 'Group', 'Title', 'Amount', 'Vendor', 'Scope', 'Tax Deductible', 'Notes'];
+    const header = ['Date', 'Kind', 'Group', 'Title', 'Amount', 'Vendor', 'Place', 'Tax Deductible', 'Notes'];
     const rows = visibleLedger.map((item) => [
       item.entryDate,
       item.kind,
@@ -308,7 +309,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
       item.title,
       item.amount.toFixed(2),
       item.vendor,
-      SCOPE_LABELS[item.propertyScope],
+      (item.place || 'General') + (item.careForJason ? " — Jason's care" : ''),
       item.taxDeductible ? 'Yes' : 'No',
       item.notes.replace(/\n/g, ' '),
     ]);
@@ -401,16 +402,18 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
 
         <div className="flex flex-wrap items-center gap-2">
           <select
-            aria-label="Filter by property or household scope"
+            aria-label="Filter by place"
             value={scopeFilter}
-            onChange={(e) => setScopeFilter(e.target.value as 'all' | FinancePropertyScope)}
+            onChange={(e) => setScopeFilter(e.target.value)}
             className="min-h-[40px] px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-700 dark:text-slate-200"
           >
-            <option value="all">All Scopes</option>
-            <option value="general">General Household</option>
-            <option value="home">Primary Home</option>
-            <option value="wimberley_conservancy">Wimberley Conservancy</option>
-            <option value="wimberley_cabin">Wimberley Rental Cabin</option>
+            <option value="all">All Places</option>
+            <option value="general">General — no place</option>
+            {PLACES.map((pl) => (
+              <option key={pl} value={pl}>
+                {pl}
+              </option>
+            ))}
           </select>
 
           <div className="relative flex-1 sm:w-64">
@@ -660,7 +663,8 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                         {item.entryDate} · {item.group}
                         {item.vendor ? ` · ${item.vendor}` : ''}
                         {' · '}
-                        {SCOPE_LABELS[item.propertyScope]}
+                        {item.place || 'General'}
+                        {item.careForJason ? " · Jason's care" : ''}
                         {item.taxDeductible ? ' · Tax Deductible' : ''}
                       </p>
                       {item.notes && (
@@ -778,10 +782,10 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                   onChange={(e) => {
                     const val = e.target.value;
                     setGroupPreset(val);
-                    if (val === 'Conservancy') setPropertyScope('wimberley_conservancy');
+                    if (val === 'Conservancy') setPlace('Riva Jade — Wildlife Conservancy');
                     else if (val === 'Rental Upkeep' || val === 'Rental Income') {
-                      setPropertyScope('wimberley_cabin');
-                    } else if (val === 'Home Repairs') setPropertyScope('home');
+                      setPlace('Riva Jade — Rental Cabin');
+                    }
                   }}
                   className="w-full min-h-[42px] px-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
                 >
@@ -872,17 +876,19 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
 
               <div className="space-y-1">
                 <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
-                  Property / Household Scope
+                  Place
                 </label>
                 <select
-                  value={propertyScope}
-                  onChange={(e) => setPropertyScope(e.target.value as FinancePropertyScope)}
+                  value={place}
+                  onChange={(e) => setPlace(e.target.value)}
                   className="w-full min-h-[42px] px-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
                 >
-                  <option value="general">General Household</option>
-                  <option value="home">Primary Home</option>
-                  <option value="wimberley_conservancy">Wimberley Conservancy</option>
-                  <option value="wimberley_cabin">Wimberley Rental Cabin</option>
+                <option value="">General — no place</option>
+                {PLACES.map((pl) => (
+                  <option key={pl} value={pl}>
+                    {pl}
+                  </option>
+                ))}
                 </select>
               </div>
             </div>
@@ -895,6 +901,16 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                 className="w-4 h-4 rounded border-slate-300 text-teal-700 focus:ring-teal-600"
               />
               <span>Flag as Tax-Deductible / Medical HSA / Conservancy / Rental Expense</span>
+            </label>
+
+            <label className="flex items-center gap-2.5 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={careForJason}
+                onChange={(e) => setCareForJason(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-300 text-teal-700 focus:ring-teal-600"
+              />
+              <span>For Jason's care — money spent taking care of Jason</span>
             </label>
 
             <div className="space-y-1">
