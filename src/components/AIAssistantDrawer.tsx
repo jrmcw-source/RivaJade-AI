@@ -187,7 +187,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
 
     const groupTotals = new Map<string, { expenses: number; income: number; count: number }>();
     const activeFinances = financeEntries.filter(
-      (f) => !isArchivedFinanceEntry(f.entryDate, getLocalTodayIso())
+      (f) => !isArchivedFinanceEntry(f, getLocalTodayIso())
     );
     for (const f of activeFinances) {
       const curr = groupTotals.get(f.group) || { expenses: 0, income: 0, count: 0 };

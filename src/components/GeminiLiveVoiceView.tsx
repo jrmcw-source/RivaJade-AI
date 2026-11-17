@@ -388,7 +388,7 @@ export const GeminiLiveVoiceView: React.FC<GeminiLiveVoiceViewProps> = ({
 
         const groupTotals = new Map<string, number>();
         for (const f of financeEntriesRef.current) {
-          if (isArchivedFinanceEntry(f.entryDate, getLocalTodayIso())) continue;
+          if (isArchivedFinanceEntry(f, getLocalTodayIso())) continue;
           if (f.kind === 'expense') {
             groupTotals.set(f.group, (groupTotals.get(f.group) || 0) + f.amount);
           }

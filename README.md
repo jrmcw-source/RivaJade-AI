@@ -54,19 +54,23 @@ the master copy of everything. Money entries can also be flagged **For
 Jason's care** — the expenses of looking after Jason at Oakleaf, kept
 tracked apart.
 
-## Retention — seven active years
+## Retention — the legal minimum stays active, everything is kept
 
-Finance records stay active for seven tax years — the current year and the
-six before it. Older entries become the archive: kept for good, never
-deleted for age, but out of the totals, lists, assistant answers, and CSV
-exports unless someone deliberately includes the archive from the ledger's
-archive bar. Backups keep everything — the archive is the family's own
-record, kept because it may be needed. For anything prepared for an
-outside party, the assistant includes only the years and records that
-party can properly ask about; a request reaching further, or asking the
-family to sign away a deadline, gets flagged for the family to decide.
-Deeds, titles, and purchase records stay active as long as the family
-owns the property.
+The desk's standing law: never offer more information than what is
+legally obligated, wherever a record resides and whatever it is used
+for. The family keeps everything, forever — but the active working
+period for a finance record is the legal minimum for its branch:
+Louisiana places, general records, and the Homestead run 3 years; the
+Rental Cabin 4 (Texas Comptroller); the Wildlife Conservancy 5 (Hays
+appraisal district's reach for wildlife reports). Older entries are the
+archive: out of the totals, lists, assistant answers, and CSV exports
+unless someone deliberately includes the archive from the ledger's
+archive bar, and never deleted. Backups keep every year. For anything
+prepared for an outside party, the assistant includes only the years
+and records that party can properly ask about; a request reaching
+further, or asking the family to sign away a deadline, gets flagged for
+the family to decide. Deeds, titles, and purchase records stay active
+as long as the family owns the property.
 
 ## Documents: checked against the paper
 

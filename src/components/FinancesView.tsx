@@ -16,7 +16,6 @@ import {
   FinanceKind,
   PLACES,
   placeMatches,
-  getFinanceArchiveCutoff,
   isArchivedFinanceEntry,
   ScannedDocument,
   getLocalTodayIso,
@@ -144,20 +143,17 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     });
   }, [entries, timeframe, scopeFilter]);
 
-  // Retention: the working set is the active seven tax years. Archived
-  // entries join only when the user deliberately includes the archive.
-  const archiveCutoff = getFinanceArchiveCutoff(getLocalTodayIso());
+  // Retention: the working set is each record's legal window for its
+  // branch. Archived entries join only when deliberately included.
   const archivedCount = useMemo(
-    () =>
-      periodFiltered.filter((e) => isArchivedFinanceEntry(e.entryDate, getLocalTodayIso()))
-        .length,
+    () => periodFiltered.filter((e) => isArchivedFinanceEntry(e, getLocalTodayIso())).length,
     [periodFiltered]
   );
   const activeFiltered = useMemo(
     () =>
       includeArchive
         ? periodFiltered
-        : periodFiltered.filter((e) => !isArchivedFinanceEntry(e.entryDate, getLocalTodayIso())),
+        : periodFiltered.filter((e) => !isArchivedFinanceEntry(e, getLocalTodayIso())),
     [periodFiltered, includeArchive]
   );
 
@@ -651,9 +647,9 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
           {archivedCount > 0 && (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 px-3 py-2">
               <p className="text-xs text-slate-600 dark:text-slate-300">
-                Archive: {archivedCount} record{archivedCount === 1 ? '' : 's'} older than the
-                seven-year window (before Jan 1, {archiveCutoff.slice(0, 4)}). Kept for good —
-                just not counted in totals or exports unless you include them.
+                Archive: {archivedCount} record{archivedCount === 1 ? '' : 's'} past the legal
+                window for their branch. Kept for good — just not counted in totals or exports
+                unless you include them.
               </p>
               <button
                 type="button"

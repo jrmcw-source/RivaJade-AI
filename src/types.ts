@@ -69,18 +69,30 @@ export function placeMatches(recordPlace: string, filter: string): boolean {
   return (PLACE_CHILDREN[filter] || []).includes(recordPlace);
 }
 
-// The family's retention rule (Jason, 2026-11-17): finance records stay
-// ACTIVE for seven tax years — the current year and the six before it.
-// Older entries are the archive: kept forever, never deleted for age, but
-// outside ordinary totals, answers, and exports unless someone asks for
-// the archive by name.
-export function getFinanceArchiveCutoff(todayIso: string): string {
-  const year = Number(todayIso.slice(0, 4));
-  return `${year - 6}-01-01`;
+// The family's retention rule (Jason, 2026-11-17): everything is kept
+// forever, but the ACTIVE working period for a finance record is the
+// legal minimum its branch answers to — the standard reach of the
+// authorities over that record, and nothing beyond it. Older entries
+// are the archive: kept, never deleted for age, but outside ordinary
+// totals, answers, and exports unless someone asks for the archive.
+export function getFinanceActiveYears(place: string): number {
+  switch (place) {
+    case 'Riva Jade — Wildlife Conservancy':
+      return 5; // Hays appraisal district may request 5 years of wildlife reports
+    case 'Riva Jade — Rental Cabin':
+      return 4; // Texas Comptroller taxes, incl. hotel occupancy, run 4 years
+    default:
+      return 3; // federal and Louisiana standard reach is 3 years
+  }
 }
 
-export function isArchivedFinanceEntry(entryDate: string, todayIso: string): boolean {
-  return entryDate < getFinanceArchiveCutoff(todayIso);
+export function isArchivedFinanceEntry(
+  entry: { entryDate: string; place?: string },
+  todayIso: string
+): boolean {
+  const years = getFinanceActiveYears(entry.place || '');
+  const cutoffYear = Number(todayIso.slice(0, 4)) - (years - 1);
+  return entry.entryDate < `${cutoffYear}-01-01`;
 }
 
 export function isPlaceName(value: unknown): value is PlaceName {
