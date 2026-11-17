@@ -76,7 +76,11 @@ export function placeMatches(recordPlace: string, filter: string): boolean {
 // are the archive: kept, never deleted for age, but outside ordinary
 // totals, answers, and exports unless someone asks for the archive.
 export function getFinanceActiveYears(place: string): number {
+  // The desk's working set per branch = the LONGEST agency limit in that
+  // branch's table below, so nothing any agency can still reach is ever
+  // out of view. The cut to one agency's limit happens at output time.
   switch (place) {
+    case 'Riva Jade':
     case 'Riva Jade — Wildlife Conservancy':
       return 5; // Hays appraisal district may request 5 years of wildlife reports
     case 'Riva Jade — Rental Cabin':
@@ -84,6 +88,86 @@ export function getFinanceActiveYears(place: string): number {
     default:
       return 3; // federal and Louisiana standard reach is 3 years
   }
+}
+
+export interface AgencyLimit {
+  agency: string;
+  years: number | null; // null = no records window (property papers rule instead)
+  note: string;
+}
+
+// Which agencies each branch may have to be dealt with, and each agency's
+// minimal limit — its standard reach over that branch's records (Jason,
+// 2026-11-17). An output prepared for an agency carries only that
+// agency's years, for the branch it concerns.
+export const AGENCY_TABLE: { place: string; agencies: AgencyLimit[] }[] = [
+  {
+    place: 'Riva Jade',
+    agencies: [
+      { agency: 'IRS (federal)', years: 3, note: 'Income tax, standard reach from filing' },
+      { agency: 'Texas Comptroller (state)', years: 4, note: 'State taxes: assessment and records window' },
+      { agency: 'Hays County Appraisal District', years: 5, note: 'May request up to 5 years of wildlife management reports' },
+    ],
+  },
+  {
+    place: 'Riva Jade — Homestead',
+    agencies: [
+      { agency: 'IRS (federal)', years: 3, note: 'Income tax, standard reach from filing' },
+      { agency: 'Hays County Appraisal District', years: null, note: 'Appraisal and exemptions — property papers, kept while owned' },
+    ],
+  },
+  {
+    place: 'Riva Jade — Rental Cabin',
+    agencies: [
+      { agency: 'IRS (federal)', years: 3, note: 'Rental income, standard reach from filing' },
+      { agency: 'Texas Comptroller (state)', years: 4, note: 'Hotel occupancy and state taxes' },
+      { agency: 'Hays County Appraisal District', years: null, note: 'Appraisal — property papers, kept while owned' },
+    ],
+  },
+  {
+    place: 'Riva Jade — Wildlife Conservancy',
+    agencies: [
+      { agency: 'IRS (federal)', years: 3, note: 'Income tax, standard reach from filing' },
+      { agency: 'Texas Comptroller (state)', years: 4, note: 'State taxes generally' },
+      { agency: 'Hays County Appraisal District', years: 5, note: 'Wildlife management reports, up to 5 years back' },
+    ],
+  },
+  {
+    place: 'Oakleaf',
+    agencies: [
+      { agency: 'IRS (federal)', years: 3, note: 'Income tax, standard reach from filing' },
+      { agency: 'Louisiana Dept. of Revenue (state)', years: 3, note: 'Prescription: 3 years from the end of the tax year' },
+      { agency: 'Lafayette Parish / City — LCG (local)', years: 3, note: 'Local sales tax prescription, 3 years' },
+    ],
+  },
+  {
+    place: 'Elephant Walk',
+    agencies: [
+      { agency: 'IRS (federal)', years: 3, note: 'Income tax, standard reach from filing' },
+      { agency: 'Louisiana Dept. of Revenue (state)', years: 3, note: 'Prescription: 3 years from the end of the tax year' },
+      { agency: 'Lafayette Parish / City — LCG (local)', years: 3, note: 'Carencro is in Lafayette Parish — same local limit as Oakleaf' },
+    ],
+  },
+];
+
+export const AGENCY_NAMES: string[] = [
+  'IRS (federal)',
+  'Texas Comptroller (state)',
+  'Hays County Appraisal District',
+  'Louisiana Dept. of Revenue (state)',
+  'Lafayette Parish / City — LCG (local)',
+];
+
+// The years an agency may reach for one place's records, or null when the
+// agency has no claim on that branch (or no records window at all).
+export function agencyLimitFor(agency: string, place: string): number | null {
+  const group = AGENCY_TABLE.find((g) => g.place === place);
+  if (group) {
+    const hit = group.agencies.find((a) => a.agency === agency);
+    return hit ? hit.years : null;
+  }
+  // General records: only the federal window is established.
+  return agency === 'IRS (federal)' ? 3 : null;
 }
 
 export function isArchivedFinanceEntry(

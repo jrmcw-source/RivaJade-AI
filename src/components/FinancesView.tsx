@@ -17,6 +17,9 @@ import {
   PLACES,
   placeMatches,
   isArchivedFinanceEntry,
+  AGENCY_TABLE,
+  AGENCY_NAMES,
+  agencyLimitFor,
   ScannedDocument,
   getLocalTodayIso,
 } from '../types';
@@ -93,6 +96,8 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   const [timeframe, setTimeframe] = useState<'month' | '90d' | 'year' | 'all'>('month');
   const [scopeFilter, setScopeFilter] = useState<string>('all');
   const [includeArchive, setIncludeArchive] = useState(false);
+  const [exportFor, setExportFor] = useState('family');
+  const [showAgencyTable, setShowAgencyTable] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<string>('ALL');
   const [groupViewMode, setGroupViewMode] = useState<'exact' | 'rollup'>('exact');
   const [searchQuery, setSearchQuery] = useState('');
@@ -318,7 +323,20 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
 
   function handleExportCsv() {
     const header = ['Date', 'Kind', 'Group', 'Title', 'Amount', 'Vendor', 'Place', 'Tax Deductible', 'Notes'];
-    const rows = visibleLedger.map((item) => [
+    // An export addressed to an agency carries only that agency's years,
+    // for the branches under its authority. A family copy carries the
+    // working set as shown.
+    const todayIso = getLocalTodayIso();
+    const exportRows =
+      exportFor === 'family'
+        ? visibleLedger
+        : visibleLedger.filter((item) => {
+            const years = agencyLimitFor(exportFor, item.place || '');
+            if (years === null) return false;
+            const cutoff = `${Number(todayIso.slice(0, 4)) - (years - 1)}-01-01`;
+            return item.entryDate >= cutoff;
+          });
+    const rows = exportRows.map((item) => [
       item.entryDate,
       item.kind,
       item.group,
@@ -355,6 +373,20 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={exportFor}
+            onChange={(e) => setExportFor(e.target.value)}
+            aria-label="Export for"
+            className="min-h-[44px] px-2.5 text-sm text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg"
+          >
+            <option value="family">Export for: Family copy</option>
+            {AGENCY_NAMES.map((name) => (
+              <option key={name} value={name}>
+                Export for: {name}
+              </option>
+            ))}
+          </select>
+
           <button
             type="button"
             onClick={handleExportCsv}
@@ -660,6 +692,38 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
               </button>
             </div>
           )}
+
+          <div className="rounded-lg border border-slate-200 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => setShowAgencyTable((v) => !v)}
+              className="w-full min-h-[38px] px-3 py-2 text-left text-xs font-medium text-slate-700 dark:text-slate-200"
+            >
+              {showAgencyTable ? 'Hide' : 'Show'} who can ask for records, and how far back
+            </button>
+            {showAgencyTable && (
+              <div className="px-3 pb-3 space-y-2.5">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  An output prepared for an agency carries only that agency's years, for the
+                  branch it concerns. The desk itself keeps everything.
+                </p>
+                {AGENCY_TABLE.map((group) => (
+                  <div key={group.place}>
+                    <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                      {group.place}
+                    </p>
+                    <ul className="mt-0.5 space-y-0.5">
+                      {group.agencies.map((a) => (
+                        <li key={a.agency} className="text-xs text-slate-600 dark:text-slate-300">
+                          {a.agency} — {a.years !== null ? `${a.years} years` : 'no records window'} · {a.note}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           {visibleLedger.length === 0 ? (
             <div className="py-12 text-center space-y-3">

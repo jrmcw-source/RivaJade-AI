@@ -72,6 +72,18 @@ further, or asking the family to sign away a deadline, gets flagged for
 the family to decide. Deeds, titles, and purchase records stay active
 as long as the family owns the property.
 
+Disclosure limits are per agency, not per property: the same branch
+owes the IRS 3 years, a Texas state agency 4, and the Hays appraisal
+district 5. The full table — which agencies each branch may deal with,
+and each one's minimal limit — lives in `src/types.ts` (`AGENCY_TABLE`),
+is shown in the Finances view under "who can ask for records, and how
+far back," and is carried in the assistant's brief. The CSV export has
+an "Export for" choice: pick an agency and the file carries only that
+agency's years for the branches under its authority; the family copy
+carries the working set. Elephant Walk (Carencro) sits in Lafayette
+Parish, the same parish as Oakleaf, so the Louisiana branches share one
+agency table.
+
 ## Documents: checked against the paper
 
 A scanned document starts out **provisional** — its words came from a
