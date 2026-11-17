@@ -33,14 +33,15 @@ interface SuggestedTaskFromOCR {
 interface DocumentScannerVaultViewProps {
   documents: ScannedDocument[];
   onSaveDocument: (
-    payload: Omit<ScannedDocument, 'id' | 'userId' | 'createdAt' | 'updatedAt'>
+    payload: Omit<ScannedDocument, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'householdId' | 'memberIds' | 'verificationStatus' | 'verifiedByName' | 'verifiedAtIso' | 'paperLocation'> & { paperLocation?: string }
   ) => Promise<string>;
   onUpdateDocument: (docId: string, updates: Partial<ScannedDocument>) => Promise<void>;
+  onVerifyDocument: (doc: ScannedDocument) => Promise<void>;
   onDeleteDocument: (docId: string) => Promise<void>;
   onCreateTaskFromDoc: (
     payload: Omit<
       ScheduleTask,
-      'id' | 'userId' | 'createdAt' | 'updatedAt' | 'completedAtIso' | 'status'
+      'id' | 'userId' | 'createdAt' | 'updatedAt' | 'completedAtIso' | 'status' | 'householdId' | 'memberIds'
     >
   ) => Promise<void>;
   scannerTriggerCount: number;
@@ -77,6 +78,7 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
   documents,
   onSaveDocument,
   onUpdateDocument,
+  onVerifyDocument,
   onDeleteDocument,
   onCreateTaskFromDoc,
   scannerTriggerCount,
@@ -110,12 +112,14 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
     suggestedTasks: SuggestedTaskFromOCR[];
     selectedTaskIndices: Record<number, boolean>;
     notes: string;
+    paperLocation: string;
   } | null>(null);
   const [newTagInput, setNewTagInput] = useState('');
   const [savingDoc, setSavingDoc] = useState(false);
 
   // Inspector edit state
   const [editTagInput, setEditTagInput] = useState('');
+  const [paperLocationInput, setPaperLocationInput] = useState('');
   const [editingOcrText, setEditingOcrText] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -289,6 +293,7 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
         suggestedTasks: data.suggestedTasks || [],
         selectedTaskIndices: selectedMap,
         notes: '',
+        paperLocation: '',
       });
     } catch (err) {
       setOcrError(err instanceof Error ? err.message : 'OCR extraction failed.');
@@ -313,6 +318,7 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
         imageUrl: draftResult.imageUrl,
         fileName: rawImageFileName,
         notes: draftResult.notes,
+        paperLocation: draftResult.paperLocation,
       });
 
       // Schedule checked suggested tasks linked to this document
@@ -371,6 +377,7 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
           doc.summary,
           doc.ocrText,
           doc.notes,
+          doc.paperLocation,
           doc.tags.join(' '),
           doc.keyDetails.join(' '),
         ]
@@ -383,6 +390,11 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
   }, [documents, activeTag, categoryFilter, searchQuery]);
 
   const selectedDoc = documents.find((d) => d.id === selectedDocId) || null;
+
+  useEffect(() => {
+    setPaperLocationInput(selectedDoc?.paperLocation || '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDocId]);
 
   return (
     <div className="space-y-6">
@@ -536,6 +548,16 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
                         )}
                         <span aria-hidden="true">·</span>
                         <span className="font-mono">{docItem.ocrText.length} OCR chars</span>
+                        <span aria-hidden="true">·</span>
+                        {docItem.verificationStatus === 'verified' ? (
+                          <span className="text-teal-700 dark:text-teal-400 font-medium">
+                            Checked against the paper
+                          </span>
+                        ) : (
+                          <span className="text-amber-700 dark:text-amber-400 font-medium">
+                            Not yet checked
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -618,6 +640,59 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
               </div>
             )}
 
+            {/* Paper Location & Checking Against the Paper */}
+            <div className="space-y-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-3.5">
+              {selectedDoc.verificationStatus === 'verified' ? (
+                <p className="text-xs text-teal-800 dark:text-teal-300">
+                  <span className="font-semibold">Checked against the paper</span>
+                  {selectedDoc.verifiedByName ? ` by ${selectedDoc.verifiedByName}` : ''}
+                  {selectedDoc.verifiedAtIso
+                    ? ` on ${new Date(selectedDoc.verifiedAtIso).toLocaleDateString()}`
+                    : ''}
+                  . The words here match the physical document.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-amber-800 dark:text-amber-300">
+                    <span className="font-semibold">Not yet checked against the paper.</span>{' '}
+                    This reading came from a photograph. Before anyone relies on it, hold the
+                    paper next to it, compare the words and numbers, then mark it checked.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void onVerifyDocument(selectedDoc)}
+                    className="min-h-[40px] inline-flex items-center gap-1.5 px-3.5 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-lg transition-colors"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>I checked it against the paper</span>
+                  </button>
+                </div>
+              )}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void onUpdateDocument(selectedDoc.id, {
+                    paperLocation: paperLocationInput.trim(),
+                  });
+                }}
+                className="flex gap-2"
+              >
+                <input
+                  type="text"
+                  value={paperLocationInput}
+                  onChange={(e) => setPaperLocationInput(e.target.value)}
+                  placeholder="Where the paper lives (e.g., Blue box in the study, folder: Taxes)"
+                  className="flex-1 min-h-[40px] px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                />
+                <button
+                  type="submit"
+                  className="min-h-[40px] px-3 text-xs font-medium text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-lg"
+                >
+                  Save Location
+                </button>
+              </form>
+            </div>
+
             {/* Keyword Tags Editor */}
             <div className="space-y-2">
               <h3 className="text-xs font-semibold text-slate-700 dark:text-slate-300">
@@ -695,7 +770,16 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
                     <button
                       type="button"
                       onClick={async () => {
-                        await onUpdateDocument(selectedDoc.id, { ocrText: editingOcrText });
+                        await onUpdateDocument(selectedDoc.id, {
+                          ocrText: editingOcrText,
+                          ...(selectedDoc.verificationStatus === 'verified'
+                            ? {
+                                verificationStatus: 'provisional' as const,
+                                verifiedByName: '',
+                                verifiedAtIso: '',
+                              }
+                            : {}),
+                        });
                         setEditingOcrText(null);
                       }}
                       className="text-xs font-medium text-teal-700 dark:text-teal-400 hover:underline"
@@ -999,6 +1083,25 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
                       ))}
                     </select>
                   </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                    Where will the paper live?
+                  </label>
+                  <input
+                    type="text"
+                    value={draftResult.paperLocation}
+                    onChange={(e) =>
+                      setDraftResult({ ...draftResult, paperLocation: e.target.value })
+                    }
+                    placeholder="e.g., Blue box in the study, folder: Taxes — so anyone can find the original"
+                    className="w-full min-h-[42px] px-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                  />
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    This scan starts out unchecked. It earns its check mark later, when someone
+                    compares it against the paper itself.
+                  </p>
                 </div>
 
                 <div className="space-y-1">

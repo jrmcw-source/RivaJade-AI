@@ -32,14 +32,14 @@ interface WimberleyPropertyViewProps {
   documents: ScannedDocument[];
   propertyTasks: ScheduleTask[];
   onCreateEntry: (
-    payload: Omit<PropertyEntry, 'id' | 'userId' | 'createdAt' | 'updatedAt'>
+    payload: Omit<PropertyEntry, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'householdId' | 'memberIds'>
   ) => Promise<void>;
   onUpdateEntry: (entryId: string, updates: Partial<PropertyEntry>) => Promise<void>;
   onDeleteEntry: (entryId: string) => Promise<void>;
   onScheduleReminderTask: (
     payload: Omit<
       ScheduleTask,
-      'id' | 'userId' | 'createdAt' | 'updatedAt' | 'completedAtIso' | 'status'
+      'id' | 'userId' | 'createdAt' | 'updatedAt' | 'completedAtIso' | 'status' | 'householdId' | 'memberIds'
     >
   ) => Promise<void>;
   onToggleTaskComplete: (task: ScheduleTask) => Promise<void>;
@@ -224,7 +224,7 @@ export const WimberleyPropertyView: React.FC<WimberleyPropertyViewProps> = ({
     setSeedingStarter(true);
     setFeedback(null);
     const today = getLocalTodayIso();
-    const starters: Array<Omit<PropertyEntry, 'id' | 'userId' | 'createdAt' | 'updatedAt'>> = [
+    const starters: Array<Omit<PropertyEntry, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'householdId' | 'memberIds'>> = [
       {
         area: 'conservancy',
         title: 'Oak Wilt Season Compliance & Canopy Inspection',

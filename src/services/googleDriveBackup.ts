@@ -286,6 +286,16 @@ export function buildOcrVaultMarkdownBackup(documents: ScannedDocument[]): strin
       }`
     );
     if (d.summary) lines.push(`- Summary: ${d.summary}`);
+    if (d.paperLocation) lines.push(`- Paper lives: ${d.paperLocation}`);
+    lines.push(
+      `- Checked against the paper: ${
+        d.verificationStatus === 'verified'
+          ? `Yes${d.verifiedByName ? ` by ${d.verifiedByName}` : ''}${
+              d.verifiedAtIso ? ` on ${d.verifiedAtIso.slice(0, 10)}` : ''
+            }`
+          : 'Not yet'
+      }`
+    );
     if (d.keyDetails.length > 0) lines.push(`- Key Details: ${d.keyDetails.join(' | ')}`);
     if (d.ocrText) {
       lines.push('');
@@ -295,4 +305,77 @@ export function buildOcrVaultMarkdownBackup(documents: ScannedDocument[]): strin
     lines.push('');
   }
   return lines.join('\n');
+}
+
+export async function ensureStewardSubfolder(
+  accessToken: string,
+  parentFolderId: string,
+  name: string
+): Promise<string> {
+  const query = encodeURIComponent(
+    `name = '${name}' and '${parentFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`
+  );
+  const searchRes = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name)&spaces=drive`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }
+  );
+  if (!searchRes.ok) {
+    throw new Error(await parseDriveError(searchRes, 'Unable to search Google Drive folders'));
+  }
+  const searchJson = (await searchRes.json()) as { files?: Array<{ id: string; name: string }> };
+  if (searchJson.files && searchJson.files.length > 0) {
+    return searchJson.files[0].id;
+  }
+
+  const createRes = await fetch('https://www.googleapis.com/drive/v3/files?fields=id,name', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [parentFolderId],
+    }),
+  });
+  if (!createRes.ok) {
+    throw new Error(await parseDriveError(createRes, 'Unable to create Google Drive folder'));
+  }
+  const created = (await createRes.json()) as { id: string };
+  return created.id;
+}
+
+export async function uploadDriveBinaryFile(
+  accessToken: string,
+  params: { folderId: string; name: string; mimeType: string; blob: Blob }
+): Promise<DriveBackupFile> {
+  const boundary = `steward_bin_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const metadata = JSON.stringify({ name: params.name, parents: [params.folderId] });
+  const body = new Blob(
+    [
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n--${boundary}\r\nContent-Type: ${params.mimeType}\r\n\r\n`,
+      params.blob,
+      `\r\n--${boundary}--`,
+    ],
+    { type: `multipart/related; boundary=${boundary}` }
+  );
+
+  const res = await fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,modifiedTime,size,webViewLink',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': `multipart/related; boundary=${boundary}`,
+      },
+      body,
+    }
+  );
+  if (!res.ok) {
+    throw new Error(await parseDriveError(res, 'Failed to upload file to Google Drive'));
+  }
+  return (await res.json()) as DriveBackupFile;
 }

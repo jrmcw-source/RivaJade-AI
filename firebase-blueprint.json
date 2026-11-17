@@ -133,6 +133,14 @@
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
         },
+        "householdId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "memberIds": {
+          "type": "array",
+          "description": "Bounded list (max 25) of household member UIDs sharing this record; [owner] when private"
+        },
         "title": {
           "type": "string",
           "minLength": 1,
@@ -207,6 +215,8 @@
       },
       "required": [
         "userId",
+        "householdId",
+        "memberIds",
         "title",
         "type",
         "category",
@@ -233,6 +243,14 @@
           "type": "string",
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "householdId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "memberIds": {
+          "type": "array",
+          "description": "Bounded list (max 25) of household member UIDs sharing this record; [owner] when private"
         },
         "title": {
           "type": "string",
@@ -286,6 +304,24 @@
           "type": "string",
           "maxLength": 2000
         },
+        "verificationStatus": {
+          "type": "string",
+          "enum": ["provisional", "verified"],
+          "description": "Trust state: a scan is provisional until a person checks it against the physical paper"
+        },
+        "verifiedByName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "verifiedAtIso": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "paperLocation": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Where the physical paper lives (which box, which folder)"
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
@@ -297,6 +333,8 @@
       },
       "required": [
         "userId",
+        "householdId",
+        "memberIds",
         "title",
         "category",
         "ocrText",
@@ -307,6 +345,10 @@
         "imageUrl",
         "fileName",
         "notes",
+        "verificationStatus",
+        "verifiedByName",
+        "verifiedAtIso",
+        "paperLocation",
         "createdAt",
         "updatedAt"
       ]
@@ -717,6 +759,14 @@
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
         },
+        "householdId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "memberIds": {
+          "type": "array",
+          "description": "Bounded list (max 25) of household member UIDs sharing this record; [owner] when private"
+        },
         "area": {
           "type": "string",
           "enum": ["conservancy", "cabin_maintenance", "cabin_stay"]
@@ -766,6 +816,8 @@
       },
       "required": [
         "userId",
+        "householdId",
+        "memberIds",
         "area",
         "title",
         "status",
@@ -788,6 +840,14 @@
           "type": "string",
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "householdId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "memberIds": {
+          "type": "array",
+          "description": "Bounded list (max 25) of household member UIDs sharing this record; [owner] when private"
         },
         "kind": {
           "type": "string",
@@ -841,6 +901,8 @@
       },
       "required": [
         "userId",
+        "householdId",
+        "memberIds",
         "kind",
         "group",
         "title",
@@ -851,6 +913,115 @@
         "taxDeductible",
         "notes",
         "linkedDocumentId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Household": {
+      "title": "Household",
+      "description": "Family household whose members share tasks, documents, property entries, and finance records",
+      "type": "object",
+      "properties": {
+        "householdId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "memberIds": {
+          "type": "array",
+          "description": "Bounded list (max 25) of member UIDs; always includes the owner"
+        },
+        "invitedEmails": {
+          "type": "array",
+          "description": "Bounded list (max 25) of lowercased email addresses invited to join"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "householdId",
+        "name",
+        "ownerId",
+        "ownerName",
+        "memberIds",
+        "invitedEmails",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "HouseholdMember": {
+      "title": "HouseholdMember",
+      "description": "Membership record inside a household subcollection, used as the Master Gate for household records",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "householdId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "householdOwnerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "username": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "role": {
+          "type": "string",
+          "enum": ["owner", "member"]
+        },
+        "memberIds": {
+          "type": "array",
+          "description": "Bounded list of household member UIDs"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "userId",
+        "householdId",
+        "householdOwnerId",
+        "displayName",
+        "username",
+        "role",
+        "memberIds",
         "createdAt",
         "updatedAt"
       ]
@@ -908,6 +1079,14 @@
     "/financeEntries/{entryId}": {
       "schema": { "$ref": "#/entities/FinanceEntry" },
       "description": "Categorized expenditures and income grouped by Conservancy, Home Repairs, Rental Upkeep, Groceries, Medical - Mom, Medical - Jason, and custom groups"
+    },
+    "/households/{householdId}": {
+      "schema": { "$ref": "#/entities/Household" },
+      "description": "Family household: members share tasks, documents, property entries, and finance records stamped with the household member list"
+    },
+    "/households/{householdId}/members/{memberId}": {
+      "schema": { "$ref": "#/entities/HouseholdMember" },
+      "description": "Household members subcollection used as Master Gate"
     }
   }
 }

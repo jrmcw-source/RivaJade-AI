@@ -39,7 +39,7 @@ interface GeminiLiveVoiceViewProps {
   onCreateTask: (
     payload: Omit<
       ScheduleTask,
-      'id' | 'userId' | 'createdAt' | 'updatedAt' | 'completedAtIso' | 'status'
+      'id' | 'userId' | 'createdAt' | 'updatedAt' | 'completedAtIso' | 'status' | 'householdId' | 'memberIds'
     >
   ) => Promise<void>;
   onCompleteTaskByTitle: (titleQuery: string) => Promise<string | null>;
@@ -51,7 +51,7 @@ interface GeminiLiveVoiceViewProps {
   }) => Promise<void>;
   onDeleteMemory: (memoryId: string) => Promise<void>;
   onLogFinanceEntry: (
-    payload: Omit<FinanceEntry, 'id' | 'userId' | 'createdAt' | 'updatedAt'>
+    payload: Omit<FinanceEntry, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'householdId' | 'memberIds'>
   ) => Promise<void>;
 }
 

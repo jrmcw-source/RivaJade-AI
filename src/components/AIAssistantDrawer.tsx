@@ -68,14 +68,14 @@ interface AIAssistantDrawerProps {
   onCreateTask: (
     payload: Omit<
       ScheduleTask,
-      'id' | 'userId' | 'createdAt' | 'updatedAt' | 'completedAtIso' | 'status'
+      'id' | 'userId' | 'createdAt' | 'updatedAt' | 'completedAtIso' | 'status' | 'householdId' | 'memberIds'
     >
   ) => Promise<void>;
   onLogFinanceEntry: (
-    payload: Omit<FinanceEntry, 'id' | 'userId' | 'createdAt' | 'updatedAt'>
+    payload: Omit<FinanceEntry, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'householdId' | 'memberIds'>
   ) => Promise<void>;
   onCreatePropertyEntry: (
-    payload: Omit<PropertyEntry, 'id' | 'userId' | 'createdAt' | 'updatedAt'>
+    payload: Omit<PropertyEntry, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'householdId' | 'memberIds'>
   ) => Promise<void>;
   onOpenDriveBackup: () => void;
   onNavigate: (tab: AssistantNavTarget) => void;

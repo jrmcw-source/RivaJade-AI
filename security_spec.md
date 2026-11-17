@@ -23,3 +23,11 @@
 10. **Unbounded array injection** on `/documents/d2` with `tags` array containing 50 items (`> 20`).
 11. **Owner transfer update** on `/tasks/t1` attempting to mutate `userId` to another UID.
 12. **Terminal state silent mutation** on a `completed` task trying to alter `title` or `dueDate` while remaining `completed` (must only allow reopening to `pending` or explicit owner-controlled valid status transitions).
+
+## 3. Household Sharing Invariants (added 2026-11-17)
+
+9. A record in `tasks`, `documents`, `propertyEntries`, or `financeEntries` is either private (`householdId == ''`, `memberIds == [owner]`) or household-stamped. A household stamp is valid only when `memberIds` exactly equals the household's own `memberIds` and the writer is a household member (Master Gate: `households/{id}/members/{uid}` exists).
+10. Household members may read and update household records; `userId` and `householdId` are immutable after creation. Deletion is reserved to the record owner or the household owner.
+11. The only update that may change `memberIds` replaces it with the household's current `memberIds` (membership sync) and touches nothing else.
+12. Joining a household requires the joiner's verified email to appear in the household's `invitedEmails`; the join adds exactly one member and must write the joiner's member record in the same batch.
+13. A scanned document is born `verificationStatus == 'provisional'`. It may become `verified` only with a non-empty `verifiedAtIso`; the verifying member's name is recorded in `verifiedByName`. `paperLocation` records where the physical paper lives.

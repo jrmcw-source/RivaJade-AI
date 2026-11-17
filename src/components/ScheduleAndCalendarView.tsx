@@ -17,6 +17,7 @@ import {
   Edit3,
   X,
   Loader2,
+  Download,
 } from 'lucide-react';
 import {
   AIPriorityPlan,
@@ -33,13 +34,14 @@ import {
   formatReminderLabel,
   getLocalTodayIso,
 } from '../types';
+import { downloadIcsCalendar } from '../services/calendarExport';
 
 interface ScheduleAndCalendarViewProps {
   userProfile: UserProfile | null;
   tasks: ScheduleTask[];
   sharedTasks: Array<ProjectTask & { projectName: string }>;
   documents: ScannedDocument[];
-  onCreateTask: (payload: Omit<ScheduleTask, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'completedAtIso' | 'status'>) => Promise<void>;
+  onCreateTask: (payload: Omit<ScheduleTask, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'completedAtIso' | 'status' | 'householdId' | 'memberIds'>) => Promise<void>;
   onUpdateTask: (taskId: string, updates: Partial<ScheduleTask>) => Promise<void>;
   onToggleTaskComplete: (task: ScheduleTask) => Promise<void>;
   onDeleteTask: (taskId: string) => Promise<void>;
@@ -365,6 +367,15 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
         </div>
 
         <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => downloadIcsCalendar(tasks, 'Steward Household Calendar')}
+            title="Download a calendar file (.ics) of open tasks and appointments — import it into Apple Calendar, Google Calendar, or Outlook"
+            className="min-h-[40px] inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg transition-colors whitespace-nowrap shrink-0"
+          >
+            <Download className="w-4 h-4" />
+            <span>Calendar File</span>
+          </button>
           <div className="inline-flex p-1 bg-slate-100 dark:bg-slate-800 rounded-lg">
             <button
               type="button"

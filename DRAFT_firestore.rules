@@ -63,6 +63,45 @@ service cloud.firestore {
         && (listVal.size() == 0 || (listVal[0] is string && listVal[0].size() <= maxItemLen));
     }
 
+
+    function isHouseholdMember(householdId) {
+      return isSignedIn()
+        && householdId is string
+        && householdId.size() > 0
+        && exists(/databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid));
+    }
+
+    function householdData(householdId) {
+      return get(/databases/$(database)/documents/households/$(householdId)).data;
+    }
+
+    function existingHouseholdId() {
+      return existing().get('householdId', '');
+    }
+
+    function existingMemberIds() {
+      return existing().get('memberIds', []);
+    }
+
+    function canAccessRecord() {
+      return existing().userId == request.auth.uid
+        || (existingHouseholdId().size() > 0 && request.auth.uid in existingMemberIds());
+    }
+
+    function isValidHouseholdStamp(data) {
+      return data.householdId is string
+        && data.householdId.size() <= 128
+        && isBoundedStringList(data.memberIds, 25, 128)
+        && data.memberIds.size() >= 1
+        && data.userId in data.memberIds
+        && request.auth.uid in data.memberIds
+        && ((data.householdId == '' && data.memberIds.size() == 1)
+          || (data.householdId.size() > 0
+            && isValidId(data.householdId)
+            && isHouseholdMember(data.householdId)
+            && data.memberIds == householdData(data.householdId).memberIds));
+    }
+
     // -------------------------------------------------------------------------
     // Entity Validation Blueprints
     // -------------------------------------------------------------------------
@@ -143,6 +182,8 @@ service cloud.firestore {
     function isValidScheduleTask(data) {
       return data.keys().hasAll([
           'userId',
+          'householdId',
+          'memberIds',
           'title',
           'type',
           'category',
@@ -161,6 +202,8 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'userId',
+          'householdId',
+          'memberIds',
           'title',
           'type',
           'category',
@@ -179,7 +222,11 @@ service cloud.firestore {
         ])
         && data.userId is string
         && isValidId(data.userId)
-        && data.userId == request.auth.uid
+        && (data.userId == request.auth.uid
+          || (data.householdId.size() > 0
+            && data.userId in data.memberIds
+            && request.auth.uid in data.memberIds))
+        && isValidHouseholdStamp(data)
         && data.title is string
         && data.title.size() >= 1
         && data.title.size() <= 200
@@ -212,6 +259,8 @@ service cloud.firestore {
     function isValidScannedDocument(data) {
       return data.keys().hasAll([
           'userId',
+          'householdId',
+          'memberIds',
           'title',
           'category',
           'ocrText',
@@ -222,11 +271,17 @@ service cloud.firestore {
           'imageUrl',
           'fileName',
           'notes',
+          'verificationStatus',
+          'verifiedByName',
+          'verifiedAtIso',
+          'paperLocation',
           'createdAt',
           'updatedAt'
         ])
         && data.keys().hasOnly([
           'userId',
+          'householdId',
+          'memberIds',
           'title',
           'category',
           'ocrText',
@@ -237,12 +292,20 @@ service cloud.firestore {
           'imageUrl',
           'fileName',
           'notes',
+          'verificationStatus',
+          'verifiedByName',
+          'verifiedAtIso',
+          'paperLocation',
           'createdAt',
           'updatedAt'
         ])
         && data.userId is string
         && isValidId(data.userId)
-        && data.userId == request.auth.uid
+        && (data.userId == request.auth.uid
+          || (data.householdId.size() > 0
+            && data.userId in data.memberIds
+            && request.auth.uid in data.memberIds))
+        && isValidHouseholdStamp(data)
         && data.title is string
         && data.title.size() >= 1
         && data.title.size() <= 200
@@ -261,6 +324,14 @@ service cloud.firestore {
         && data.fileName.size() <= 200
         && data.notes is string
         && data.notes.size() <= 2000
+        && data.verificationStatus in ['provisional', 'verified']
+        && data.verifiedByName is string
+        && data.verifiedByName.size() <= 120
+        && data.verifiedAtIso is string
+        && data.verifiedAtIso.size() <= 40
+        && (data.verificationStatus == 'provisional' || data.verifiedAtIso.size() > 0)
+        && data.paperLocation is string
+        && data.paperLocation.size() <= 200
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -537,6 +608,8 @@ service cloud.firestore {
     function isValidPropertyEntry(data) {
       return data.keys().hasAll([
           'userId',
+          'householdId',
+          'memberIds',
           'area',
           'title',
           'status',
@@ -551,6 +624,8 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'userId',
+          'householdId',
+          'memberIds',
           'area',
           'title',
           'status',
@@ -565,7 +640,11 @@ service cloud.firestore {
         ])
         && data.userId is string
         && isValidId(data.userId)
-        && data.userId == request.auth.uid
+        && (data.userId == request.auth.uid
+          || (data.householdId.size() > 0
+            && data.userId in data.memberIds
+            && request.auth.uid in data.memberIds))
+        && isValidHouseholdStamp(data)
         && data.area in ['conservancy', 'cabin_maintenance', 'cabin_stay']
         && data.title is string
         && data.title.size() >= 1
@@ -590,6 +669,8 @@ service cloud.firestore {
     function isValidFinanceEntry(data) {
       return data.keys().hasAll([
           'userId',
+          'householdId',
+          'memberIds',
           'kind',
           'group',
           'title',
@@ -605,6 +686,8 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'userId',
+          'householdId',
+          'memberIds',
           'kind',
           'group',
           'title',
@@ -620,7 +703,11 @@ service cloud.firestore {
         ])
         && data.userId is string
         && isValidId(data.userId)
-        && data.userId == request.auth.uid
+        && (data.userId == request.auth.uid
+          || (data.householdId.size() > 0
+            && data.userId in data.memberIds
+            && request.auth.uid in data.memberIds))
+        && isValidHouseholdStamp(data)
         && data.kind in ['expense', 'income']
         && data.group is string
         && data.group.size() >= 1
@@ -642,6 +729,79 @@ service cloud.firestore {
         && data.notes.size() <= 2000
         && data.linkedDocumentId is string
         && data.linkedDocumentId.size() <= 128
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+
+    function isValidHousehold(data) {
+      return data.keys().hasAll([
+          'householdId',
+          'name',
+          'ownerId',
+          'ownerName',
+          'memberIds',
+          'invitedEmails',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'householdId',
+          'name',
+          'ownerId',
+          'ownerName',
+          'memberIds',
+          'invitedEmails',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.householdId)
+        && data.name is string
+        && data.name.size() >= 1
+        && data.name.size() <= 120
+        && isValidId(data.ownerId)
+        && data.ownerName is string
+        && data.ownerName.size() <= 120
+        && isBoundedStringList(data.memberIds, 25, 128)
+        && data.memberIds.size() >= 1
+        && data.ownerId in data.memberIds
+        && isBoundedStringList(data.invitedEmails, 25, 254)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidHouseholdMember(data) {
+      return data.keys().hasAll([
+          'userId',
+          'householdId',
+          'householdOwnerId',
+          'displayName',
+          'username',
+          'role',
+          'memberIds',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId',
+          'householdId',
+          'householdOwnerId',
+          'displayName',
+          'username',
+          'role',
+          'memberIds',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.userId)
+        && isValidId(data.householdId)
+        && isValidId(data.householdOwnerId)
+        && data.displayName is string
+        && data.displayName.size() <= 120
+        && data.username is string
+        && data.username.size() <= 40
+        && data.role in ['owner', 'member']
+        && isBoundedStringList(data.memberIds, 25, 128)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -727,18 +887,20 @@ service cloud.firestore {
     }
 
     match /tasks/{taskId} {
-      allow get: if isSignedIn() && isValidId(taskId) && existing().userId == request.auth.uid;
-      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(taskId) && canAccessRecord();
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || request.auth.uid in resource.data.get('memberIds', []));
       allow create: if isVerifiedUser()
         && isValidId(taskId)
         && isValidScheduleTask(incoming())
+        && (incoming().householdId == '' || isHouseholdMember(incoming().householdId))
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
       allow update: if isVerifiedUser()
         && isValidId(taskId)
         && isValidScheduleTask(incoming())
-        && existing().userId == request.auth.uid
+        && (existing().userId == request.auth.uid || isHouseholdMember(existingHouseholdId()))
         && incoming().userId == existing().userId
+        && incoming().householdId == existingHouseholdId()
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && (
@@ -756,42 +918,55 @@ service cloud.firestore {
               'notes',
               'helpSteps',
               'linkedDocumentId',
+              'householdId',
+              'memberIds',
               'updatedAt'
             ]))
           ||
           (existing().status == 'pending'
             && incoming().status == 'pending'
-            && incoming().diff(existing()).affectedKeys().hasOnly(['helpSteps', 'updatedAt']))
+            && incoming().diff(existing()).affectedKeys().hasOnly(['helpSteps', 'householdId', 'memberIds', 'updatedAt']))
           ||
           (existing().status == 'pending'
             && incoming().status == 'completed'
             && incoming().completedAtIso.size() > 0
-            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'completedAtIso', 'updatedAt']))
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'completedAtIso', 'householdId', 'memberIds', 'updatedAt']))
           ||
           (existing().status == 'completed'
             && incoming().status == 'pending'
             && incoming().completedAtIso == ''
-            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'completedAtIso', 'updatedAt']))
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'completedAtIso', 'householdId', 'memberIds', 'updatedAt']))
+          ||
+          (existingHouseholdId().size() > 0
+            && isHouseholdMember(existingHouseholdId())
+            && incoming().memberIds == householdData(existingHouseholdId()).memberIds
+            && incoming().diff(existing()).affectedKeys().hasOnly(['memberIds', 'updatedAt']))
         );
-      allow delete: if isVerifiedUser() && isValidId(taskId) && existing().userId == request.auth.uid;
+      allow delete: if isVerifiedUser() && isValidId(taskId)
+        && (existing().userId == request.auth.uid
+          || (existingHouseholdId().size() > 0
+            && isHouseholdMember(existingHouseholdId())
+            && householdData(existingHouseholdId()).ownerId == request.auth.uid));
     }
 
     match /documents/{documentId} {
-      allow get: if isSignedIn() && isValidId(documentId) && existing().userId == request.auth.uid;
-      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(documentId) && canAccessRecord();
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || request.auth.uid in resource.data.get('memberIds', []));
       allow create: if isVerifiedUser()
         && isValidId(documentId)
         && isValidScannedDocument(incoming())
+        && (incoming().householdId == '' || isHouseholdMember(incoming().householdId))
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
       allow update: if isVerifiedUser()
         && isValidId(documentId)
         && isValidScannedDocument(incoming())
-        && existing().userId == request.auth.uid
+        && (existing().userId == request.auth.uid || isHouseholdMember(existingHouseholdId()))
         && incoming().userId == existing().userId
+        && incoming().householdId == existingHouseholdId()
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly([
+        && (incoming().diff(existing()).affectedKeys().hasOnly([
           'title',
           'category',
           'ocrText',
@@ -800,9 +975,23 @@ service cloud.firestore {
           'keyDetails',
           'detectedDate',
           'notes',
+          'verificationStatus',
+          'verifiedByName',
+          'verifiedAtIso',
+          'paperLocation',
+          'householdId',
+          'memberIds',
           'updatedAt'
-        ]);
-      allow delete: if isVerifiedUser() && isValidId(documentId) && existing().userId == request.auth.uid;
+        ])
+        || (existingHouseholdId().size() > 0
+          && isHouseholdMember(existingHouseholdId())
+          && incoming().memberIds == householdData(existingHouseholdId()).memberIds
+          && incoming().diff(existing()).affectedKeys().hasOnly(['memberIds', 'updatedAt'])));
+      allow delete: if isVerifiedUser() && isValidId(documentId)
+        && (existing().userId == request.auth.uid
+          || (existingHouseholdId().size() > 0
+            && isHouseholdMember(existingHouseholdId())
+            && householdData(existingHouseholdId()).ownerId == request.auth.uid));
     }
 
     match /voiceMemories/{memoryId} {
@@ -963,6 +1152,79 @@ service cloud.firestore {
       }
     }
 
+    match /households/{householdId} {
+      allow get: if isSignedIn() && isValidId(householdId)
+        && (request.auth.uid in existing().memberIds
+          || (request.auth.token.email_verified == true && request.auth.token.email.lower() in existing().invitedEmails));
+      allow list: if isSignedIn()
+        && (request.auth.uid in resource.data.memberIds
+          || (request.auth.token.email_verified == true && request.auth.token.email.lower() in resource.data.invitedEmails));
+      allow create: if isVerifiedUser()
+        && isValidId(householdId)
+        && isValidHousehold(incoming())
+        && incoming().householdId == householdId
+        && incoming().ownerId == request.auth.uid
+        && incoming().memberIds.size() == 1
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && existsAfter(/databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid));
+      allow update: if isVerifiedUser()
+        && isValidId(householdId)
+        && isValidHousehold(incoming())
+        && incoming().householdId == existing().householdId
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (existing().ownerId == request.auth.uid
+            && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'memberIds', 'invitedEmails', 'updatedAt']))
+          ||
+          (request.auth.token.email.lower() in existing().invitedEmails
+            && !(request.auth.uid in existing().memberIds)
+            && request.auth.uid in incoming().memberIds
+            && incoming().memberIds.size() == existing().memberIds.size() + 1
+            && incoming().diff(existing()).affectedKeys().hasOnly(['memberIds', 'updatedAt'])
+            && existsAfter(/databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid)))
+        );
+      allow delete: if isVerifiedUser() && isValidId(householdId) && existing().ownerId == request.auth.uid;
+
+      match /members/{memberId} {
+        allow get: if isSignedIn() && isValidId(householdId) && isValidId(memberId) && (isHouseholdMember(householdId) || request.auth.uid in existing().memberIds);
+        allow list: if isSignedIn() && (request.auth.uid in resource.data.memberIds || resource.data.householdOwnerId == request.auth.uid);
+        allow create: if isVerifiedUser()
+          && isValidId(householdId)
+          && isValidId(memberId)
+          && isValidHouseholdMember(incoming())
+          && incoming().householdId == householdId
+          && incoming().userId == memberId
+          && incoming().userId == request.auth.uid
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && (
+            (incoming().role == 'owner'
+              && incoming().householdOwnerId == request.auth.uid
+              && existsAfter(/databases/$(database)/documents/households/$(householdId)))
+            ||
+            (incoming().role == 'member'
+              && exists(/databases/$(database)/documents/households/$(householdId))
+              && request.auth.token.email.lower() in householdData(householdId).invitedEmails)
+          );
+        allow update: if isVerifiedUser()
+          && isValidId(householdId)
+          && isValidId(memberId)
+          && isValidHouseholdMember(incoming())
+          && incoming().userId == existing().userId
+          && incoming().householdId == existing().householdId
+          && incoming().householdOwnerId == existing().householdOwnerId
+          && incoming().role == existing().role
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && isHouseholdMember(householdId)
+          && incoming().diff(existing()).affectedKeys().hasOnly(['memberIds', 'displayName', 'username', 'updatedAt']);
+        allow delete: if isVerifiedUser() && isValidId(householdId) && isValidId(memberId) && (existing().householdOwnerId == request.auth.uid || existing().userId == request.auth.uid);
+      }
+    }
+
     match /projectInvites/{inviteId} {
       allow get: if isSignedIn()
         && isValidId(inviteId)
@@ -1027,21 +1289,23 @@ service cloud.firestore {
     }
 
     match /propertyEntries/{entryId} {
-      allow get: if isSignedIn() && isValidId(entryId) && existing().userId == request.auth.uid;
-      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(entryId) && canAccessRecord();
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || request.auth.uid in resource.data.get('memberIds', []));
       allow create: if isVerifiedUser()
         && isValidId(entryId)
         && isValidPropertyEntry(incoming())
+        && (incoming().householdId == '' || isHouseholdMember(incoming().householdId))
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
       allow update: if isVerifiedUser()
         && isValidId(entryId)
         && isValidPropertyEntry(incoming())
-        && existing().userId == request.auth.uid
+        && (existing().userId == request.auth.uid || isHouseholdMember(existingHouseholdId()))
         && incoming().userId == existing().userId
+        && incoming().householdId == existingHouseholdId()
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly([
+        && (incoming().diff(existing()).affectedKeys().hasOnly([
           'area',
           'title',
           'status',
@@ -1051,27 +1315,39 @@ service cloud.firestore {
           'inspectorOrGuest',
           'notes',
           'linkedDocumentId',
+          'householdId',
+          'memberIds',
           'updatedAt'
-        ]);
-      allow delete: if isVerifiedUser() && isValidId(entryId) && existing().userId == request.auth.uid;
+        ])
+        || (existingHouseholdId().size() > 0
+          && isHouseholdMember(existingHouseholdId())
+          && incoming().memberIds == householdData(existingHouseholdId()).memberIds
+          && incoming().diff(existing()).affectedKeys().hasOnly(['memberIds', 'updatedAt'])));
+      allow delete: if isVerifiedUser() && isValidId(entryId)
+        && (existing().userId == request.auth.uid
+          || (existingHouseholdId().size() > 0
+            && isHouseholdMember(existingHouseholdId())
+            && householdData(existingHouseholdId()).ownerId == request.auth.uid));
     }
 
     match /financeEntries/{entryId} {
-      allow get: if isSignedIn() && isValidId(entryId) && existing().userId == request.auth.uid;
-      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(entryId) && canAccessRecord();
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || request.auth.uid in resource.data.get('memberIds', []));
       allow create: if isVerifiedUser()
         && isValidId(entryId)
         && isValidFinanceEntry(incoming())
+        && (incoming().householdId == '' || isHouseholdMember(incoming().householdId))
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
       allow update: if isVerifiedUser()
         && isValidId(entryId)
         && isValidFinanceEntry(incoming())
-        && existing().userId == request.auth.uid
+        && (existing().userId == request.auth.uid || isHouseholdMember(existingHouseholdId()))
         && incoming().userId == existing().userId
+        && incoming().householdId == existingHouseholdId()
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly([
+        && (incoming().diff(existing()).affectedKeys().hasOnly([
           'kind',
           'group',
           'title',
@@ -1082,9 +1358,19 @@ service cloud.firestore {
           'taxDeductible',
           'notes',
           'linkedDocumentId',
+          'householdId',
+          'memberIds',
           'updatedAt'
-        ]);
-      allow delete: if isVerifiedUser() && isValidId(entryId) && existing().userId == request.auth.uid;
+        ])
+        || (existingHouseholdId().size() > 0
+          && isHouseholdMember(existingHouseholdId())
+          && incoming().memberIds == householdData(existingHouseholdId()).memberIds
+          && incoming().diff(existing()).affectedKeys().hasOnly(['memberIds', 'updatedAt'])));
+      allow delete: if isVerifiedUser() && isValidId(entryId)
+        && (existing().userId == request.auth.uid
+          || (existingHouseholdId().size() > 0
+            && isHouseholdMember(existingHouseholdId())
+            && householdData(existingHouseholdId()).ownerId == request.auth.uid));
     }
   }
 }

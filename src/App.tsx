@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { User, onAuthStateChanged } from 'firebase/auth';
 import {
   collection,
@@ -48,6 +48,8 @@ import {
   Category,
   FinanceEntry,
   FocusWindow,
+  Household,
+  HouseholdMember,
   ProjectInvite,
   ProjectMember,
   ProjectTask,
@@ -93,6 +95,38 @@ function sanitizeHandle(raw: string, fallbackUid: string): string {
   return `user_${fallbackUid.slice(0, 8).toLowerCase()}`;
 }
 
+
+function withHouseholdDefaults<
+  T extends { userId: string; householdId?: string; memberIds?: string[] },
+>(rec: T): T {
+  return {
+    ...rec,
+    householdId: rec.householdId || '',
+    memberIds:
+      Array.isArray(rec.memberIds) && rec.memberIds.length > 0 ? rec.memberIds : [rec.userId],
+  };
+}
+
+function withDocumentDefaults(
+  rec: Omit<ScannedDocument, 'id'>
+): Omit<ScannedDocument, 'id'> {
+  const base = withHouseholdDefaults(rec);
+  return {
+    ...base,
+    verificationStatus: base.verificationStatus || 'provisional',
+    verifiedByName: base.verifiedByName || '',
+    verifiedAtIso: base.verifiedAtIso || '',
+    paperLocation: base.paperLocation || '',
+  };
+}
+
+function mergeRecordsById<T extends { id: string }>(own: T[], shared: T[]): T[] {
+  const map = new Map<string, T>();
+  shared.forEach((r) => map.set(r.id, r));
+  own.forEach((r) => map.set(r.id, r));
+  return Array.from(map.values());
+}
+
 function MainApp() {
   const isOnline = useOnlineStatus();
   const [user, setUser] = useState<User | null>(null);
@@ -111,8 +145,10 @@ function MainApp() {
 
   // Cloud-synced Firestore state
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [tasks, setTasks] = useState<ScheduleTask[]>([]);
-  const [documents, setDocuments] = useState<ScannedDocument[]>([]);
+  const [ownTasks, setOwnTasks] = useState<ScheduleTask[]>([]);
+  const [sharedTasks, setSharedTasks] = useState<ScheduleTask[]>([]);
+  const [ownDocuments, setOwnDocuments] = useState<ScannedDocument[]>([]);
+  const [sharedDocuments, setSharedDocuments] = useState<ScannedDocument[]>([]);
   const [voiceMemories, setVoiceMemories] = useState<VoiceMemoryState[]>([]);
   const [projects, setProjects] = useState<SharedProject[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -120,8 +156,18 @@ function MainApp() {
   const [projectTasks, setProjectTasks] = useState<ProjectTask[]>([]);
   const [incomingInvites, setIncomingInvites] = useState<ProjectInvite[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  const [propertyEntries, setPropertyEntries] = useState<PropertyEntry[]>([]);
-  const [financeEntries, setFinanceEntries] = useState<FinanceEntry[]>([]);
+  const [ownPropertyEntries, setOwnPropertyEntries] = useState<PropertyEntry[]>([]);
+  const [sharedPropertyEntries, setSharedPropertyEntries] = useState<PropertyEntry[]>([]);
+  const [ownFinanceEntries, setOwnFinanceEntries] = useState<FinanceEntry[]>([]);
+  const [sharedFinanceEntries, setSharedFinanceEntries] = useState<FinanceEntry[]>([]);
+  const [households, setHouseholds] = useState<Household[]>([]);
+  const [selectedHouseholdId, setSelectedHouseholdId] = useState<string>('');
+  const [joinableHouseholds, setJoinableHouseholds] = useState<Household[]>([]);
+  const [householdMembers, setHouseholdMembers] = useState<HouseholdMember[]>([]);
+  const [shareWithHousehold, setShareWithHousehold] = useState(true);
+  const [householdNameDraft, setHouseholdNameDraft] = useState('');
+  const [householdInviteDraft, setHouseholdInviteDraft] = useState('');
+  const [householdFeedback, setHouseholdFeedback] = useState<string | null>(null);
 
   // Settings form state
   const [editUsername, setEditUsername] = useState('');
@@ -207,16 +253,23 @@ function MainApp() {
         }
       } else {
         setUserProfile(null);
-        setTasks([]);
-        setDocuments([]);
+        setOwnTasks([]);
+        setSharedTasks([]);
+        setOwnDocuments([]);
+        setSharedDocuments([]);
         setVoiceMemories([]);
         setProjects([]);
         setProjectMembers([]);
         setProjectTasks([]);
         setIncomingInvites([]);
         setNotifications([]);
-        setPropertyEntries([]);
-        setFinanceEntries([]);
+        setOwnPropertyEntries([]);
+        setSharedPropertyEntries([]);
+        setOwnFinanceEntries([]);
+        setSharedFinanceEntries([]);
+        setHouseholds([]);
+        setJoinableHouseholds([]);
+        setHouseholdMembers([]);
       }
     });
     return () => unsub();
@@ -241,7 +294,25 @@ function MainApp() {
     const unsubTasks = onSnapshot(
       query(collection(db, 'tasks'), where('userId', '==', user.uid)),
       (snap) => {
-        setTasks(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ScheduleTask, 'id'>) })));
+        setOwnTasks(
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...withHouseholdDefaults(d.data() as Omit<ScheduleTask, 'id'>),
+          }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'tasks')
+    );
+
+    const unsubTasksShared = onSnapshot(
+      query(collection(db, 'tasks'), where('memberIds', 'array-contains', user.uid)),
+      (snap) => {
+        setSharedTasks(
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...withHouseholdDefaults(d.data() as Omit<ScheduleTask, 'id'>),
+          }))
+        );
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'tasks')
     );
@@ -249,8 +320,24 @@ function MainApp() {
     const unsubDocs = onSnapshot(
       query(collection(db, 'documents'), where('userId', '==', user.uid)),
       (snap) => {
-        setDocuments(
-          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ScannedDocument, 'id'>) }))
+        setOwnDocuments(
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...withDocumentDefaults(d.data() as Omit<ScannedDocument, 'id'>),
+          }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'documents')
+    );
+
+    const unsubDocsShared = onSnapshot(
+      query(collection(db, 'documents'), where('memberIds', 'array-contains', user.uid)),
+      (snap) => {
+        setSharedDocuments(
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...withDocumentDefaults(d.data() as Omit<ScannedDocument, 'id'>),
+          }))
         );
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'documents')
@@ -341,8 +428,24 @@ function MainApp() {
     const unsubPropertyEntries = onSnapshot(
       query(collection(db, 'propertyEntries'), where('userId', '==', user.uid)),
       (snap) => {
-        setPropertyEntries(
-          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<PropertyEntry, 'id'>) }))
+        setOwnPropertyEntries(
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...withHouseholdDefaults(d.data() as Omit<PropertyEntry, 'id'>),
+          }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'propertyEntries')
+    );
+
+    const unsubPropertyShared = onSnapshot(
+      query(collection(db, 'propertyEntries'), where('memberIds', 'array-contains', user.uid)),
+      (snap) => {
+        setSharedPropertyEntries(
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...withHouseholdDefaults(d.data() as Omit<PropertyEntry, 'id'>),
+          }))
         );
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'propertyEntries')
@@ -351,24 +454,71 @@ function MainApp() {
     const unsubFinanceEntries = onSnapshot(
       query(collection(db, 'financeEntries'), where('userId', '==', user.uid)),
       (snap) => {
-        setFinanceEntries(
-          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<FinanceEntry, 'id'>) }))
+        setOwnFinanceEntries(
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...withHouseholdDefaults(d.data() as Omit<FinanceEntry, 'id'>),
+          }))
         );
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'financeEntries')
     );
 
+    const unsubFinanceShared = onSnapshot(
+      query(collection(db, 'financeEntries'), where('memberIds', 'array-contains', user.uid)),
+      (snap) => {
+        setSharedFinanceEntries(
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...withHouseholdDefaults(d.data() as Omit<FinanceEntry, 'id'>),
+          }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'financeEntries')
+    );
+
+    const unsubHouseholds = onSnapshot(
+      query(collection(db, 'households'), where('memberIds', 'array-contains', user.uid)),
+      (snap) => {
+        setHouseholds(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Household, 'id'>) }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'households')
+    );
+
+    const unsubJoinableHouseholds = userEmailLower
+      ? onSnapshot(
+          query(
+            collection(db, 'households'),
+            where('invitedEmails', 'array-contains', userEmailLower)
+          ),
+          (snap) => {
+            setJoinableHouseholds(
+              snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Household, 'id'>) }))
+            );
+          },
+          (err) => handleFirestoreError(err, OperationType.LIST, 'households')
+        )
+      : () => {};
+
     return () => {
       unsubProfile();
       unsubTasks();
+      unsubTasksShared();
       unsubDocs();
+      unsubDocsShared();
       unsubMemories();
       unsubProjects();
       unsubInvitesEmail();
       unsubInvitesUid();
       unsubNotifications();
       unsubPropertyEntries();
+      unsubPropertyShared();
       unsubFinanceEntries();
+      unsubFinanceShared();
+      unsubHouseholds();
+      unsubJoinableHouseholds();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authReady, user]);
@@ -415,11 +565,188 @@ function MainApp() {
     };
   }, [authReady, user, selectedProjectId]);
 
+  // Household: merged views (own records + records shared with me)
+  const activeHousehold =
+    households.find((h) => h.householdId === selectedHouseholdId) ??
+    households[0] ??
+    null;
+
+  function switchHousehold(householdId: string) {
+    setSelectedHouseholdId(householdId);
+    if (user) {
+      try {
+        localStorage.setItem(`steward-active-household-${user.uid}`, householdId);
+      } catch {
+        // Storage unavailable; the choice still holds for this session.
+      }
+    }
+  }
+
+  // Restore the household this person was last viewing on this device.
+  useEffect(() => {
+    if (!user) return;
+    try {
+      const saved = localStorage.getItem(`steward-active-household-${user.uid}`);
+      if (saved) setSelectedHouseholdId(saved);
+    } catch {
+      // Storage unavailable; fall back to the first household.
+    }
+  }, [user]);
+  const tasks = useMemo(
+    () => mergeRecordsById(ownTasks, sharedTasks),
+    [ownTasks, sharedTasks]
+  );
+  const documents = useMemo(
+    () => mergeRecordsById(ownDocuments, sharedDocuments),
+    [ownDocuments, sharedDocuments]
+  );
+  const propertyEntries = useMemo(
+    () => mergeRecordsById(ownPropertyEntries, sharedPropertyEntries),
+    [ownPropertyEntries, sharedPropertyEntries]
+  );
+  const financeEntries = useMemo(
+    () => mergeRecordsById(ownFinanceEntries, sharedFinanceEntries),
+    [ownFinanceEntries, sharedFinanceEntries]
+  );
+
+  // What the views show: my private records plus the active household's.
+  // The full merged lists above still feed Drive backup, restore, and the
+  // membership sync, which work across every household I belong to.
+  const householdInScope = (hid: string) =>
+    !hid ||
+    !activeHousehold ||
+    hid === activeHousehold.householdId ||
+    !households.some((h) => h.householdId === hid);
+  const visibleTasks = useMemo(
+    () => tasks.filter((t) => householdInScope(t.householdId)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tasks, activeHousehold, households]
+  );
+  const visibleDocuments = useMemo(
+    () => documents.filter((d) => householdInScope(d.householdId)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [documents, activeHousehold, households]
+  );
+  const visiblePropertyEntries = useMemo(
+    () => propertyEntries.filter((p) => householdInScope(p.householdId)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [propertyEntries, activeHousehold, households]
+  );
+  const visibleFinanceEntries = useMemo(
+    () => financeEntries.filter((f) => householdInScope(f.householdId)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [financeEntries, activeHousehold, households]
+  );
+
+  const activeHouseholdId = activeHousehold?.householdId ?? null;
+
+  // Household members of the active household
+  useEffect(() => {
+    if (!authReady || !user || !activeHouseholdId) {
+      setHouseholdMembers([]);
+      return;
+    }
+    const unsub = onSnapshot(
+      query(
+        collection(db, 'households', activeHouseholdId, 'members'),
+        where('memberIds', 'array-contains', user.uid)
+      ),
+      (snap) => {
+        setHouseholdMembers(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<HouseholdMember, 'id'>) }))
+        );
+      },
+      (err) =>
+        handleFirestoreError(err, OperationType.LIST, `households/${activeHouseholdId}/members`)
+    );
+    return () => unsub();
+  }, [authReady, user, activeHouseholdId]);
+
+  // Membership sync: when the household member list changes, bring every
+  // household record's stamped member list up to date (rules allow only this
+  // exact replacement, and only for household members).
+  const lastHouseholdSyncRef = useRef<string>('');
+  useEffect(() => {
+    if (!user || !activeHousehold) return;
+    const hid = activeHousehold.householdId;
+    const members = activeHousehold.memberIds;
+    const signature = `${hid}|${members.join(',')}`;
+    if (lastHouseholdSyncRef.current === signature) return;
+    const stale = (
+      recs: Array<{ id: string; householdId?: string; memberIds?: string[] }>
+    ) =>
+      recs.filter(
+        (r) => r.householdId === hid && (r.memberIds || []).join(',') !== members.join(',')
+      );
+    const staleTasks = stale(tasks);
+    const staleDocs = stale(documents);
+    const staleProps = stale(propertyEntries);
+    const staleFins = stale(financeEntries);
+    const staleMembers = householdMembers.filter(
+      (m) => (m.memberIds || []).join(',') !== members.join(',')
+    );
+    if (
+      staleTasks.length === 0 &&
+      staleDocs.length === 0 &&
+      staleProps.length === 0 &&
+      staleFins.length === 0 &&
+      staleMembers.length === 0
+    ) {
+      lastHouseholdSyncRef.current = signature;
+      return;
+    }
+    lastHouseholdSyncRef.current = signature;
+    (async () => {
+      const jobs: Array<Promise<unknown>> = [];
+      staleTasks.forEach((r) =>
+        jobs.push(
+          updateDoc(doc(db, 'tasks', r.id), {
+            memberIds: members,
+            updatedAt: serverTimestamp(),
+          })
+        )
+      );
+      staleDocs.forEach((r) =>
+        jobs.push(
+          updateDoc(doc(db, 'documents', r.id), {
+            memberIds: members,
+            updatedAt: serverTimestamp(),
+          })
+        )
+      );
+      staleProps.forEach((r) =>
+        jobs.push(
+          updateDoc(doc(db, 'propertyEntries', r.id), {
+            memberIds: members,
+            updatedAt: serverTimestamp(),
+          })
+        )
+      );
+      staleFins.forEach((r) =>
+        jobs.push(
+          updateDoc(doc(db, 'financeEntries', r.id), {
+            memberIds: members,
+            updatedAt: serverTimestamp(),
+          })
+        )
+      );
+      staleMembers.forEach((m) =>
+        jobs.push(
+          updateDoc(doc(db, 'households', hid, 'members', m.id), {
+            memberIds: members,
+            updatedAt: serverTimestamp(),
+          })
+        )
+      );
+      await Promise.allSettled(jobs);
+    })();
+  }, [user, activeHousehold, tasks, documents, propertyEntries, financeEntries, householdMembers]);
+
   // Active Reminder Banner computation
   const activeReminders = useMemo(() => {
     const todayIso = getLocalTodayIso();
     const now = new Date();
-    return tasks.filter((t) => {
+    return visibleTasks.filter((t) => {
       if (t.status !== 'pending' || dismissedReminders[t.id]) return false;
       if (t.dueDate < todayIso) return true;
       if (t.dueDate === todayIso) {
@@ -436,22 +763,42 @@ function MainApp() {
       const remindAt = new Date(dueDateObj.getTime() - t.reminderMinutes * 60000);
       return now >= remindAt;
     });
-  }, [tasks, dismissedReminders]);
+  }, [visibleTasks, dismissedReminders]);
 
   // ---------------------------------------------------------------------------
   // Firestore CRUD Handlers (strictly matching firebase-blueprint.json & rules)
   // ---------------------------------------------------------------------------
+  function householdStamp(): { householdId: string; memberIds: string[] } {
+    if (activeHousehold && shareWithHousehold) {
+      return {
+        householdId: activeHousehold.householdId,
+        memberIds: activeHousehold.memberIds.slice(0, 25),
+      };
+    }
+    return { householdId: '', memberIds: user ? [user.uid] : [] };
+  }
+
   async function handleCreateTask(
     payload: Omit<
       ScheduleTask,
-      'id' | 'userId' | 'createdAt' | 'updatedAt' | 'completedAtIso' | 'status'
+      | 'id'
+      | 'userId'
+      | 'createdAt'
+      | 'updatedAt'
+      | 'completedAtIso'
+      | 'status'
+      | 'householdId'
+      | 'memberIds'
     >
   ) {
     if (!user) return;
     const id = createSafeId('task');
+    const stamp = householdStamp();
     try {
       await setDoc(doc(db, 'tasks', id), {
         userId: user.uid,
+        householdId: stamp.householdId,
+        memberIds: stamp.memberIds,
         title: payload.title.slice(0, 200),
         type: payload.type,
         category: payload.category,
@@ -477,6 +824,15 @@ function MainApp() {
     if (!user) return;
     try {
       const clean: Record<string, unknown> = { updatedAt: serverTimestamp() };
+      const existingRec = tasks.find((r) => r.id === taskId);
+      if (existingRec) {
+        clean.householdId = existingRec.householdId || '';
+        clean.memberIds =
+          existingRec.memberIds && existingRec.memberIds.length > 0
+            ? existingRec.memberIds
+            : [existingRec.userId];
+      }
+
       if (updates.title !== undefined) clean.title = updates.title.slice(0, 200);
       if (updates.type !== undefined) clean.type = updates.type;
       if (updates.category !== undefined) clean.category = updates.category;
@@ -507,6 +863,9 @@ function MainApp() {
         await updateDoc(doc(db, 'tasks', task.id), {
           status: 'completed',
           completedAtIso: nowIso,
+          householdId: task.householdId || '',
+          memberIds:
+            task.memberIds && task.memberIds.length > 0 ? task.memberIds : [task.userId],
           updatedAt: serverTimestamp(),
         });
         await handleRecordBehaviorSignal(
@@ -516,6 +875,9 @@ function MainApp() {
         await updateDoc(doc(db, 'tasks', task.id), {
           status: 'pending',
           completedAtIso: '',
+          householdId: task.householdId || '',
+          memberIds:
+            task.memberIds && task.memberIds.length > 0 ? task.memberIds : [task.userId],
           updatedAt: serverTimestamp(),
         });
       }
@@ -563,13 +925,28 @@ function MainApp() {
 
   // Document Vault Handlers
   async function handleSaveDocument(
-    payload: Omit<ScannedDocument, 'id' | 'userId' | 'createdAt' | 'updatedAt'>
+    payload: Omit<
+      ScannedDocument,
+      | 'id'
+      | 'userId'
+      | 'createdAt'
+      | 'updatedAt'
+      | 'householdId'
+      | 'memberIds'
+      | 'verificationStatus'
+      | 'verifiedByName'
+      | 'verifiedAtIso'
+      | 'paperLocation'
+    > & { paperLocation?: string }
   ): Promise<string> {
     if (!user) return '';
     const id = createSafeId('doc');
+    const stamp = householdStamp();
     try {
       await setDoc(doc(db, 'documents', id), {
         userId: user.uid,
+        householdId: stamp.householdId,
+        memberIds: stamp.memberIds,
         title: payload.title.slice(0, 200),
         category: payload.category,
         ocrText: payload.ocrText.slice(0, 99000),
@@ -580,6 +957,10 @@ function MainApp() {
         imageUrl: payload.imageUrl.slice(0, 500),
         fileName: payload.fileName.slice(0, 200),
         notes: (payload.notes || '').slice(0, 2000),
+        verificationStatus: 'provisional',
+        verifiedByName: '',
+        verifiedAtIso: '',
+        paperLocation: (payload.paperLocation || '').slice(0, 200),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
@@ -602,6 +983,30 @@ function MainApp() {
         clean.keyDetails = updates.keyDetails.slice(0, 25).map((k) => k.slice(0, 240));
       if (updates.detectedDate !== undefined) clean.detectedDate = updates.detectedDate.slice(0, 20);
       if (updates.notes !== undefined) clean.notes = updates.notes.slice(0, 2000);
+      if (updates.verificationStatus !== undefined)
+        clean.verificationStatus = updates.verificationStatus;
+      if (updates.verifiedByName !== undefined)
+        clean.verifiedByName = updates.verifiedByName.slice(0, 120);
+      if (updates.verifiedAtIso !== undefined)
+        clean.verifiedAtIso = updates.verifiedAtIso.slice(0, 40);
+      if (updates.paperLocation !== undefined)
+        clean.paperLocation = updates.paperLocation.slice(0, 200);
+      const existingDoc = documents.find((r) => r.id === docId);
+      if (existingDoc) {
+        clean.householdId = existingDoc.householdId || '';
+        clean.memberIds =
+          existingDoc.memberIds && existingDoc.memberIds.length > 0
+            ? existingDoc.memberIds
+            : [existingDoc.userId];
+        if (clean.verificationStatus === undefined)
+          clean.verificationStatus = existingDoc.verificationStatus || 'provisional';
+        if (clean.verifiedByName === undefined)
+          clean.verifiedByName = existingDoc.verifiedByName || '';
+        if (clean.verifiedAtIso === undefined)
+          clean.verifiedAtIso = existingDoc.verifiedAtIso || '';
+        if (clean.paperLocation === undefined)
+          clean.paperLocation = existingDoc.paperLocation || '';
+      }
 
       await updateDoc(doc(db, 'documents', docId), clean);
     } catch (err) {
@@ -965,13 +1370,16 @@ function MainApp() {
 
   // Wimberley Property Monitor Handlers
   async function handleCreatePropertyEntry(
-    payload: Omit<PropertyEntry, 'id' | 'userId' | 'createdAt' | 'updatedAt'>
+    payload: Omit<PropertyEntry, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'householdId' | 'memberIds'>
   ) {
     if (!user) return;
     const id = createSafeId('prop');
+    const stamp = householdStamp();
     try {
       await setDoc(doc(db, 'propertyEntries', id), {
         userId: user.uid,
+        householdId: stamp.householdId,
+        memberIds: stamp.memberIds,
         area: payload.area,
         title: payload.title.slice(0, 200),
         status: payload.status,
@@ -993,6 +1401,15 @@ function MainApp() {
     if (!user) return;
     try {
       const clean: Record<string, unknown> = { updatedAt: serverTimestamp() };
+      const existingRec = propertyEntries.find((r) => r.id === entryId);
+      if (existingRec) {
+        clean.householdId = existingRec.householdId || '';
+        clean.memberIds =
+          existingRec.memberIds && existingRec.memberIds.length > 0
+            ? existingRec.memberIds
+            : [existingRec.userId];
+      }
+
       if (updates.area !== undefined) clean.area = updates.area;
       if (updates.title !== undefined) clean.title = updates.title.slice(0, 200);
       if (updates.status !== undefined) clean.status = updates.status;
@@ -1021,13 +1438,16 @@ function MainApp() {
 
   // Finance & Expenditure Grouping Handlers
   async function handleCreateFinanceEntry(
-    payload: Omit<FinanceEntry, 'id' | 'userId' | 'createdAt' | 'updatedAt'>
+    payload: Omit<FinanceEntry, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'householdId' | 'memberIds'>
   ) {
     if (!user) return;
     const id = createSafeId('fin');
+    const stamp = householdStamp();
     try {
       await setDoc(doc(db, 'financeEntries', id), {
         userId: user.uid,
+        householdId: stamp.householdId,
+        memberIds: stamp.memberIds,
         kind: payload.kind,
         group: payload.group.slice(0, 80),
         title: payload.title.slice(0, 200),
@@ -1050,6 +1470,15 @@ function MainApp() {
     if (!user) return;
     try {
       const clean: Record<string, unknown> = { updatedAt: serverTimestamp() };
+      const existingRec = financeEntries.find((r) => r.id === entryId);
+      if (existingRec) {
+        clean.householdId = existingRec.householdId || '';
+        clean.memberIds =
+          existingRec.memberIds && existingRec.memberIds.length > 0
+            ? existingRec.memberIds
+            : [existingRec.userId];
+      }
+
       if (updates.kind !== undefined) clean.kind = updates.kind;
       if (updates.group !== undefined) clean.group = updates.group.slice(0, 80);
       if (updates.title !== undefined) clean.title = updates.title.slice(0, 200);
@@ -1074,6 +1503,134 @@ function MainApp() {
       await deleteDoc(doc(db, 'financeEntries', entryId));
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `financeEntries/${entryId}`);
+    }
+  }
+
+  // Family Household Handlers
+  async function handleCreateHousehold(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user) return;
+    const name = householdNameDraft.trim().slice(0, 120);
+    if (!name) {
+      setHouseholdFeedback('Give the household a name first.');
+      return;
+    }
+    const householdId = createSafeId('hh');
+    const displayName = userProfile?.displayName || user.displayName || 'Household Owner';
+    const username = userProfile?.username || sanitizeHandle('owner', user.uid);
+    try {
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'households', householdId), {
+        householdId,
+        name,
+        ownerId: user.uid,
+        ownerName: displayName.slice(0, 120),
+        memberIds: [user.uid],
+        invitedEmails: [],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      batch.set(doc(db, 'households', householdId, 'members', user.uid), {
+        userId: user.uid,
+        householdId,
+        householdOwnerId: user.uid,
+        displayName: displayName.slice(0, 120),
+        username,
+        role: 'owner',
+        memberIds: [user.uid],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      await batch.commit();
+      switchHousehold(householdId);
+      setHouseholdNameDraft('');
+      setHouseholdFeedback(
+        `Household "${name}" is ready. Invite your family by email and their records will join yours here.`
+      );
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `households/${householdId}`);
+    }
+  }
+
+  async function handleInviteToHousehold(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user || !activeHousehold) return;
+    const email = householdInviteDraft.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setHouseholdFeedback('Enter a valid email address to invite.');
+      return;
+    }
+    if (activeHousehold.invitedEmails.includes(email)) {
+      setHouseholdFeedback(`${email} is already invited.`);
+      return;
+    }
+    try {
+      await updateDoc(doc(db, 'households', activeHousehold.householdId), {
+        invitedEmails: [...activeHousehold.invitedEmails, email].slice(0, 25),
+        updatedAt: serverTimestamp(),
+      });
+      setHouseholdInviteDraft('');
+      setHouseholdFeedback(
+        `Invited ${email}. When they sign in with that email, the invitation will be waiting here.`
+      );
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `households/${activeHousehold.householdId}`);
+    }
+  }
+
+  async function handleJoinHousehold(household: Household) {
+    if (!user) return;
+    const displayName = userProfile?.displayName || user.displayName || 'Family Member';
+    const username = userProfile?.username || sanitizeHandle('member', user.uid);
+    const alreadyMember = household.memberIds.includes(user.uid);
+    const nextMembers = alreadyMember
+      ? household.memberIds
+      : [...household.memberIds, user.uid].slice(0, 25);
+    try {
+      const batch = writeBatch(db);
+      if (!alreadyMember) {
+        batch.update(doc(db, 'households', household.householdId), {
+          memberIds: nextMembers,
+          updatedAt: serverTimestamp(),
+        });
+      }
+      batch.set(doc(db, 'households', household.householdId, 'members', user.uid), {
+        userId: user.uid,
+        householdId: household.householdId,
+        householdOwnerId: household.ownerId,
+        displayName: displayName.slice(0, 120),
+        username,
+        role: 'member',
+        memberIds: nextMembers,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      await batch.commit();
+      switchHousehold(household.householdId);
+      setHouseholdFeedback(`You joined "${household.name}".`);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `households/${household.householdId}`);
+    }
+  }
+
+  async function handleVerifyDocument(docRecord: ScannedDocument) {
+    if (!user) return;
+    const verifierName = userProfile?.displayName || user.displayName || 'Family member';
+    try {
+      await updateDoc(doc(db, 'documents', docRecord.id), {
+        verificationStatus: 'verified',
+        verifiedByName: verifierName.slice(0, 120),
+        verifiedAtIso: new Date().toISOString(),
+        householdId: docRecord.householdId || '',
+        memberIds:
+          docRecord.memberIds && docRecord.memberIds.length > 0
+            ? docRecord.memberIds
+            : [docRecord.userId],
+        paperLocation: docRecord.paperLocation || '',
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `documents/${docRecord.id}`);
     }
   }
 
@@ -1356,6 +1913,25 @@ function MainApp() {
             <span className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-100 font-display">
               Steward
             </span>
+            {activeHousehold &&
+              (households.length > 1 ? (
+                <select
+                  value={activeHousehold.householdId}
+                  onChange={(e) => switchHousehold(e.target.value)}
+                  aria-label="Switch household"
+                  className="mt-1 w-full text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-2 py-1.5 text-slate-700 dark:text-slate-200"
+                >
+                  {households.map((h) => (
+                    <option key={h.householdId} value={h.householdId}>
+                      {h.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  {activeHousehold.name}
+                </p>
+              ))}
           </div>
 
           <nav className="space-y-1">
@@ -1562,9 +2138,9 @@ function MainApp() {
           {activeTab === 'schedule' && (
             <ScheduleAndCalendarView
               userProfile={userProfile}
-              tasks={tasks}
+              tasks={visibleTasks}
               sharedTasks={sharedTasksWithProject}
-              documents={documents}
+              documents={visibleDocuments}
               onCreateTask={handleCreateTask}
               onUpdateTask={handleUpdateTask}
               onToggleTaskComplete={handleToggleTaskComplete}
@@ -1577,9 +2153,9 @@ function MainApp() {
 
           {activeTab === 'property' && (
             <WimberleyPropertyView
-              entries={propertyEntries}
-              documents={documents}
-              propertyTasks={tasks.filter((t) => t.category === 'Wimberley Property')}
+              entries={visiblePropertyEntries}
+              documents={visibleDocuments}
+              propertyTasks={visibleTasks.filter((t) => t.category === 'Wimberley Property')}
               onCreateEntry={handleCreatePropertyEntry}
               onUpdateEntry={handleUpdatePropertyEntry}
               onDeleteEntry={handleDeletePropertyEntry}
@@ -1590,8 +2166,8 @@ function MainApp() {
 
           {activeTab === 'finances' && (
             <FinancesView
-              entries={financeEntries}
-              documents={documents}
+              entries={visibleFinanceEntries}
+              documents={visibleDocuments}
               onCreateEntry={handleCreateFinanceEntry}
               onUpdateEntry={handleUpdateFinanceEntry}
               onDeleteEntry={handleDeleteFinanceEntry}
@@ -1600,9 +2176,10 @@ function MainApp() {
 
           {activeTab === 'vault' && (
             <DocumentScannerVaultView
-              documents={documents}
+              documents={visibleDocuments}
               onSaveDocument={handleSaveDocument}
               onUpdateDocument={handleUpdateDocument}
+              onVerifyDocument={handleVerifyDocument}
               onDeleteDocument={handleDeleteDocument}
               onCreateTaskFromDoc={handleCreateTask}
               scannerTriggerCount={scannerTriggerCount}
@@ -1633,11 +2210,11 @@ function MainApp() {
           {activeTab === 'voice' && (
             <GeminiLiveVoiceView
               userName={userProfile?.displayName || user.displayName || 'User'}
-              tasks={tasks}
-              documents={documents}
+              tasks={visibleTasks}
+              documents={visibleDocuments}
               memories={voiceMemories}
-              propertyEntries={propertyEntries}
-              financeEntries={financeEntries}
+              propertyEntries={visiblePropertyEntries}
+              financeEntries={visibleFinanceEntries}
               onCreateTask={handleCreateTask}
               onCompleteTaskByTitle={handleCompleteTaskByTitle}
               onSaveMemory={handleSaveVoiceMemory}
@@ -1648,8 +2225,8 @@ function MainApp() {
 
           {activeTab === 'analytics' && (
             <AnalyticsDashboardView
-              tasks={tasks}
-              documents={documents}
+              tasks={visibleTasks}
+              documents={visibleDocuments}
               projects={projects}
               sharedTasks={sharedTasksWithProject}
               onNavigate={setActiveTab}
@@ -1732,6 +2309,163 @@ function MainApp() {
               )}
             </form>
 
+            <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                Family Household
+              </h3>
+              {activeHousehold ? (
+                <div className="space-y-3 text-sm">
+                  <p className="text-slate-700 dark:text-slate-300">
+                    <span className="font-medium">{activeHousehold.name}</span>
+                    <span className="text-slate-500 dark:text-slate-400">
+                      {' '}
+                      · {activeHousehold.memberIds.length} member
+                      {activeHousehold.memberIds.length === 1 ? '' : 's'}
+                    </span>
+                  </p>
+                  {householdMembers.length > 0 && (
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {householdMembers.map((m) => m.displayName).join(', ')}
+                    </p>
+                  )}
+                  <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400">
+                    <input
+                      type="checkbox"
+                      checked={shareWithHousehold}
+                      onChange={(e) => setShareWithHousehold(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      Share new tasks, documents, property entries, and money records with the
+                      household. Turn this off when something should stay private to you.
+                    </span>
+                  </label>
+                  {activeHousehold.ownerId === user.uid && (
+                    <form onSubmit={handleInviteToHousehold} className="space-y-2">
+                      <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                        Invite a family member by email
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="email"
+                          value={householdInviteDraft}
+                          onChange={(e) => setHouseholdInviteDraft(e.target.value)}
+                          placeholder="name@example.com"
+                          className="flex-1 min-h-[42px] px-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                        />
+                        <button
+                          type="submit"
+                          className="min-h-[42px] inline-flex items-center px-3.5 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-lg"
+                        >
+                          Invite
+                        </button>
+                      </div>
+                      {activeHousehold.invitedEmails.length > 0 && (
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          Invited: {activeHousehold.invitedEmails.join(', ')}
+                        </p>
+                      )}
+                    </form>
+                  )}
+                  {households.length > 1 && (
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                        Your households — tap one to view it
+                      </p>
+                      {households.map((h) => (
+                        <button
+                          key={h.householdId}
+                          type="button"
+                          onClick={() => switchHousehold(h.householdId)}
+                          className="w-full min-h-[40px] flex items-center justify-between gap-2 px-3 py-2 text-xs font-medium bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-lg transition-colors"
+                        >
+                          <span>{h.name}</span>
+                          <span className="text-slate-500 dark:text-slate-400">
+                            {h.householdId === activeHousehold.householdId
+                              ? 'Viewing now'
+                              : `${h.memberIds.length} member${h.memberIds.length === 1 ? '' : 's'}`}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <form onSubmit={handleCreateHousehold} className="space-y-2 pt-1">
+                    <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                      Start another household
+                    </label>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Each household is its own private desk. Only its own members can see its
+                      records — a second household stays separate from this one.
+                    </p>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={householdNameDraft}
+                        onChange={(e) => setHouseholdNameDraft(e.target.value)}
+                        placeholder="e.g., Derek and Dawn's House"
+                        className="flex-1 min-h-[42px] px-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                      />
+                      <button
+                        type="submit"
+                        className="min-h-[42px] inline-flex items-center px-3.5 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-lg"
+                      >
+                        Create
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              ) : (
+                <div className="space-y-3 text-sm">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    A household is how your family shares one desk — the same schedule,
+                    documents, and records, on everyone's own phone or computer.
+                  </p>
+                  <form onSubmit={handleCreateHousehold} className="space-y-2">
+                    <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                      Start your family's household
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={householdNameDraft}
+                        onChange={(e) => setHouseholdNameDraft(e.target.value)}
+                        placeholder="e.g., McWhirter Family"
+                        className="flex-1 min-h-[42px] px-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                      />
+                      <button
+                        type="submit"
+                        className="min-h-[42px] inline-flex items-center px-3.5 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-lg"
+                      >
+                        Create
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+              {joinableHouseholds
+                .filter((h) => !households.some((mine) => mine.householdId === h.householdId))
+                .map((h) => (
+                  <div
+                    key={h.householdId}
+                    className="flex items-center justify-between gap-2 rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-950/40 px-3 py-2"
+                  >
+                    <span className="text-xs text-teal-900 dark:text-teal-200">
+                      {h.ownerName} invited you to join "{h.name}"
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleJoinHousehold(h)}
+                      className="min-h-[36px] px-3 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-lg"
+                    >
+                      Join
+                    </button>
+                  </div>
+                ))}
+              {householdFeedback && (
+                <p className="text-xs text-teal-700 dark:text-teal-400">{householdFeedback}</p>
+              )}
+            </div>
+
             <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-2">
                 <PWAInstallModalTrigger compact />
@@ -1795,10 +2529,10 @@ function MainApp() {
         open={assistantOpen}
         onClose={() => setAssistantOpen(false)}
         userName={userProfile?.displayName || user.displayName || 'User'}
-        tasks={tasks}
-        propertyEntries={propertyEntries}
-        financeEntries={financeEntries}
-        documents={documents}
+        tasks={visibleTasks}
+        propertyEntries={visiblePropertyEntries}
+        financeEntries={visibleFinanceEntries}
+        documents={visibleDocuments}
         driveConnected={driveConnected}
         onCreateTask={handleCreateTask}
         onLogFinanceEntry={handleCreateFinanceEntry}

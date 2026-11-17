@@ -23,7 +23,7 @@ interface FinancesViewProps {
   entries: FinanceEntry[];
   documents: ScannedDocument[];
   onCreateEntry: (
-    payload: Omit<FinanceEntry, 'id' | 'userId' | 'createdAt' | 'updatedAt'>
+    payload: Omit<FinanceEntry, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'householdId' | 'memberIds'>
   ) => Promise<void>;
   onUpdateEntry: (entryId: string, updates: Partial<FinanceEntry>) => Promise<void>;
   onDeleteEntry: (entryId: string) => Promise<void>;

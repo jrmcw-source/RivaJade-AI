@@ -34,6 +34,8 @@ export interface UserProfile {
 export interface ScheduleTask {
   id: string;
   userId: string;
+  householdId: string;
+  memberIds: string[];
   title: string;
   type: TaskType;
   category: Category;
@@ -51,9 +53,13 @@ export interface ScheduleTask {
   updatedAt?: unknown;
 }
 
+export type DocVerificationStatus = 'provisional' | 'verified';
+
 export interface ScannedDocument {
   id: string;
   userId: string;
+  householdId: string;
+  memberIds: string[];
   title: string;
   category: Category;
   ocrText: string;
@@ -64,6 +70,10 @@ export interface ScannedDocument {
   imageUrl: string;
   fileName: string;
   notes: string;
+  verificationStatus: DocVerificationStatus;
+  verifiedByName: string;
+  verifiedAtIso: string;
+  paperLocation: string;
   createdAt?: unknown;
   updatedAt?: unknown;
 }
@@ -124,6 +134,29 @@ export interface ProjectTask {
   updatedAt?: unknown;
 }
 
+export interface Household {
+  id: string;
+  householdId: string;
+  name: string;
+  ownerId: string;
+  ownerName: string;
+  memberIds: string[];
+  invitedEmails: string[];
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+export interface HouseholdMember {
+  id: string;
+  userId: string;
+  householdId: string;
+  householdOwnerId: string;
+  displayName: string;
+  username: string;
+  role: 'owner' | 'member';
+  memberIds: string[];
+}
+
 export interface ProjectInvite {
   id: string;
   projectId: string;
@@ -182,6 +215,8 @@ export type PropertyCadence = 'once' | 'monthly' | 'quarterly' | 'seasonal' | 'a
 export interface PropertyEntry {
   id: string;
   userId: string;
+  householdId: string;
+  memberIds: string[];
   area: PropertyEntryArea;
   title: string;
   status: PropertyEntryStatus;
@@ -263,6 +298,8 @@ export const DEFAULT_EXPENDITURE_GROUPS = [
 export interface FinanceEntry {
   id: string;
   userId: string;
+  householdId: string;
+  memberIds: string[];
   kind: FinanceKind;
   group: string;
   title: string;
