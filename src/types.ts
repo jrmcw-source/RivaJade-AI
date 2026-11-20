@@ -305,6 +305,22 @@ export interface JasonNote {
   updatedAt?: unknown;
 }
 
+// The morning briefing (Jason, 2026-11-20): one briefing per household
+// per day, written by the desk model from the day's own records and
+// saved, so the whole household reads or hears the same one and the
+// paid API tier is only sipped — one model call a day. dateKey is the
+// household's local day, YYYY-MM-DD.
+export interface MorningBriefing {
+  id: string;
+  userId: string;
+  householdId: string;
+  memberIds: string[];
+  dateKey: string;
+  text: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
 export interface SharedProject {
   id: string;
   projectId: string;

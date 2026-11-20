@@ -60,6 +60,7 @@ import {
   Household,
   HouseholdMember,
   JasonNote,
+  MorningBriefing,
   ProjectInvite,
   ProjectMember,
   ProjectTask,
@@ -161,6 +162,23 @@ function withJasonNoteDefaults(
   };
 }
 
+function withBriefingDefaults(
+  rec: Omit<MorningBriefing, 'id'>
+): Omit<MorningBriefing, 'id'> {
+  const base = withHouseholdDefaults(rec);
+  return {
+    ...base,
+    dateKey: base.dateKey || '',
+    text: base.text || '',
+  };
+}
+
+function localDateKey(d: Date = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+    d.getDate()
+  ).padStart(2, '0')}`;
+}
+
 function mergeRecordsById<T extends { id: string }>(own: T[], shared: T[]): T[] {
   const map = new Map<string, T>();
   shared.forEach((r) => map.set(r.id, r));
@@ -212,6 +230,8 @@ function MainApp() {
   const [sharedFinanceEntries, setSharedFinanceEntries] = useState<FinanceEntry[]>([]);
   const [ownJasonNotes, setOwnJasonNotes] = useState<JasonNote[]>([]);
   const [sharedJasonNotes, setSharedJasonNotes] = useState<JasonNote[]>([]);
+  const [ownBriefings, setOwnBriefings] = useState<MorningBriefing[]>([]);
+  const [sharedBriefings, setSharedBriefings] = useState<MorningBriefing[]>([]);
   const [households, setHouseholds] = useState<Household[]>([]);
   const [selectedHouseholdId, setSelectedHouseholdId] = useState<string>('');
   const [selectedPlace, setSelectedPlace] = useState<string>('');
@@ -435,6 +455,32 @@ function MainApp() {
       (err) => handleFirestoreError(err, OperationType.LIST, 'jasonNotes')
     );
 
+    const unsubBriefings = onSnapshot(
+      query(collection(db, 'briefings'), where('userId', '==', user.uid)),
+      (snap) => {
+        setOwnBriefings(
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...withBriefingDefaults(d.data() as Omit<MorningBriefing, 'id'>),
+          }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'briefings')
+    );
+
+    const unsubBriefingsShared = onSnapshot(
+      query(collection(db, 'briefings'), where('memberIds', 'array-contains', user.uid)),
+      (snap) => {
+        setSharedBriefings(
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...withBriefingDefaults(d.data() as Omit<MorningBriefing, 'id'>),
+          }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'briefings')
+    );
+
     const unsubProjects = onSnapshot(
       query(collection(db, 'projects'), where('participantIds', 'array-contains', user.uid)),
       (snap) => {
@@ -593,6 +639,8 @@ function MainApp() {
       unsubMemories();
       unsubJasonNotes();
       unsubJasonNotesShared();
+      unsubBriefings();
+      unsubBriefingsShared();
       unsubProjects();
       unsubInvitesEmail();
       unsubInvitesUid();
@@ -718,6 +766,10 @@ function MainApp() {
     () => mergeRecordsById(ownJasonNotes, sharedJasonNotes),
     [ownJasonNotes, sharedJasonNotes]
   );
+  const briefings = useMemo(
+    () => mergeRecordsById(ownBriefings, sharedBriefings),
+    [ownBriefings, sharedBriefings]
+  );
 
   // What the views show: my private records plus the active household's.
   // The full merged lists above still feed Drive backup, restore, and the
@@ -751,6 +803,15 @@ function MainApp() {
     () => jasonNotes.filter((n) => householdInScope(n.householdId)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [jasonNotes, activeHousehold, households]
+  );
+  const visibleBriefings = useMemo(
+    () => briefings.filter((b) => householdInScope(b.householdId)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [briefings, activeHousehold, households]
+  );
+  const todaysBriefing = useMemo(
+    () => visibleBriefings.find((b) => b.dateKey === localDateKey()) || null,
+    [visibleBriefings]
   );
 
   // The place filter: choosing a branch shows that branch and everything
@@ -1130,6 +1191,125 @@ function MainApp() {
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, `jasonNotes/${id}`);
+    }
+  }
+
+  // The morning briefing (Jason, 2026-11-20): generated once per
+  // household per day — the first person in hears the need, the server
+  // makes the one paid-tier call, and the saved briefing serves the
+  // whole household from then on. Returns the briefing text, or null
+  // when it could not be prepared.
+  const briefingInFlightRef = useRef<string>('');
+  async function handleEnsureBriefing(): Promise<string | null> {
+    if (!user) return null;
+    const dateKey = localDateKey();
+    const existing = briefings.find(
+      (b) => b.dateKey === dateKey && householdInScope(b.householdId)
+    );
+    if (existing) return existing.text;
+    if (briefingInFlightRef.current === dateKey) return null;
+    briefingInFlightRef.current = dateKey;
+    try {
+      const todayK = localDateKey();
+      const tomorrowK = localDateKey(new Date(Date.now() + 86400000));
+      const keyOf = (iso: string) => (iso || '').slice(0, 10);
+      const fmtDay = (key: string) =>
+        new Date(`${key}T12:00:00`).toLocaleDateString('en-US', {
+          weekday: 'long',
+          month: 'long',
+          day: 'numeric',
+        });
+      const line = (t: ScheduleTask) =>
+        `- ${t.title}${t.dueTime ? ` at ${t.dueTime}` : ''} (due ${fmtDay(keyOf(t.dueDate))})${
+          t.place ? ` — ${t.place}` : ''
+        }`;
+      const pending = visibleTasks.filter((t) => t.status !== 'completed');
+      const overdue = pending
+        .filter((t) => keyOf(t.dueDate) < todayK)
+        .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+      const dueToday = pending.filter((t) => keyOf(t.dueDate) === todayK);
+      const dueTomorrow = pending.filter((t) => keyOf(t.dueDate) === tomorrowK);
+      const upcoming = pending
+        .filter((t) => keyOf(t.dueDate) > tomorrowK)
+        .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+        .slice(0, 4);
+      const threeDaysAgo = Date.now() - 3 * 86400000;
+      const recentDone = visibleTasks
+        .filter(
+          (t) =>
+            t.status === 'completed' &&
+            t.completedAtIso &&
+            new Date(t.completedAtIso).getTime() >= threeDaysAgo
+        )
+        .sort((a, b) => (b.completedAtIso || '').localeCompare(a.completedAtIso || ''))
+        .slice(0, 6);
+      const waitingNotes = visibleJasonNotes.filter((n) => !n.handled).length;
+      const sections: string[] = [];
+      if (overdue.length) sections.push(`OVERDUE:\n${overdue.slice(0, 8).map(line).join('\n')}`);
+      if (dueToday.length) sections.push(`DUE TODAY:\n${dueToday.map(line).join('\n')}`);
+      if (dueTomorrow.length)
+        sections.push(`DUE TOMORROW:\n${dueTomorrow.map(line).join('\n')}`);
+      if (upcoming.length) sections.push(`COMING UP:\n${upcoming.map(line).join('\n')}`);
+      if (recentDone.length)
+        sections.push(
+          `DONE IN THE LAST FEW DAYS:\n${recentDone
+            .map(
+              (t) =>
+                `- ${t.title} (done ${
+                  t.completedAtIso ? fmtDay(keyOf(t.completedAtIso)) : 'recently'
+                }${
+                  t.completionState === 'more'
+                    ? `, more to do${t.remainderNote ? `: ${t.remainderNote}` : ''}`
+                    : ', finished'
+                })`
+            )
+            .join('\n')}`
+        );
+      if (waitingNotes > 0) sections.push(`NOTES WAITING FOR JASON: ${waitingNotes}`);
+      const briefingSummary = sections.length
+        ? sections.join('\n\n')
+        : 'Nothing is overdue, nothing is due today or tomorrow, and nothing was finished in the last few days. The desk is clear.';
+
+      const resp = await fetch('/api/assistant/briefing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          context: {
+            userName: userProfile?.displayName || user.displayName || 'Steward User',
+            addressName: userProfile?.addressName || '',
+            currentDateTime: new Date().toLocaleString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+              hour: 'numeric',
+              minute: '2-digit',
+            }),
+            briefingSummary,
+          },
+        }),
+      });
+      if (!resp.ok) return null;
+      const data = (await resp.json()) as { briefing?: string };
+      const text = String(data.briefing || '').trim();
+      if (!text) return null;
+      const stamp = householdStamp();
+      const id = `brief-${(stamp.householdId || user.uid).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40)}-${dateKey}`;
+      await setDoc(doc(db, 'briefings', id), {
+        userId: user.uid,
+        householdId: stamp.householdId,
+        memberIds: stamp.memberIds,
+        dateKey,
+        text: text.slice(0, 4000),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      return text;
+    } catch (err) {
+      console.error('Morning briefing failed', err);
+      return null;
+    } finally {
+      briefingInFlightRef.current = '';
     }
   }
 
@@ -2554,6 +2734,24 @@ function MainApp() {
             </div>
           )}
 
+          {todaysBriefing && (
+            <div className="mb-6 bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-800 rounded-xl p-5 space-y-3">
+              <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                This morning's briefing
+              </h2>
+              <div className="space-y-2">
+                {todaysBriefing.text.split(/\n\s*\n/).map((para, i) => (
+                  <p
+                    key={i}
+                    className="text-sm leading-relaxed text-slate-700 dark:text-slate-200"
+                  >
+                    {para}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+
           {visibleJasonNotes.length > 0 && (
             <div className="mb-6 bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-800 rounded-xl p-5 space-y-3">
               <div className="flex items-center justify-between gap-3">
@@ -3184,6 +3382,8 @@ function MainApp() {
           onCreateJasonNote={handleCreateJasonNote}
           onCompleteTaskByTitle={handleCompleteTaskByTitle}
           onShowCalendar={handleShowCalendar}
+          briefingText={todaysBriefing?.text || null}
+          onRequestBriefing={handleEnsureBriefing}
           onSaveMemory={handleSaveVoiceMemory}
           onRecordBehaviorSignal={handleRecordBehaviorSignal}
         />

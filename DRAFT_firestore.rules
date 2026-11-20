@@ -425,6 +425,37 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidMorningBriefing(data) {
+      return data.keys().hasAll([
+          'userId',
+          'householdId',
+          'memberIds',
+          'dateKey',
+          'text',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId',
+          'householdId',
+          'memberIds',
+          'dateKey',
+          'text',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.userId is string
+        && isValidId(data.userId)
+        && isValidHouseholdStamp(data)
+        && data.dateKey is string
+        && data.dateKey.size() == 10
+        && data.text is string
+        && data.text.size() >= 1
+        && data.text.size() <= 4000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     function isValidSharedProject(data) {
       return data.keys().hasAll([
           'projectId',
@@ -1108,6 +1139,32 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly(['handled', 'updatedAt']);
       allow delete: if isVerifiedUser() && isValidId(noteId)
+        && (existing().userId == request.auth.uid
+          || isHouseholdMember(existingHouseholdId())
+          || (existingHouseholdId().size() > 0
+            && householdData(existingHouseholdId()).ownerId == request.auth.uid));
+    }
+
+    match /briefings/{briefingId} {
+      allow get: if isSignedIn() && isValidId(briefingId) && canAccessRecord();
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || request.auth.uid in resource.data.get('memberIds', []));
+      allow create: if isVerifiedUser()
+        && isValidId(briefingId)
+        && isValidMorningBriefing(incoming())
+        && incoming().userId == request.auth.uid
+        && (incoming().householdId == '' || isHouseholdMember(incoming().householdId))
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(briefingId)
+        && isValidMorningBriefing(incoming())
+        && (existing().userId == request.auth.uid || isHouseholdMember(existingHouseholdId()))
+        && incoming().userId == existing().userId
+        && incoming().householdId == existingHouseholdId()
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['text', 'updatedAt']);
+      allow delete: if isVerifiedUser() && isValidId(briefingId)
         && (existing().userId == request.auth.uid
           || isHouseholdMember(existingHouseholdId())
           || (existingHouseholdId().size() > 0

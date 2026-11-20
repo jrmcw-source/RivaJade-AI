@@ -1078,6 +1078,20 @@ FRONT DOOR — how you speak with her (these bind every desk):
     brief: string;
   }
 
+  // The morning briefing's brief (Jason, 2026-11-20): the article's
+  // lesson applied — one narrow job, a prepared pile of the day's own
+  // records, a fixed shape, nothing invented. It is written to be read
+  // aloud by the front door, in the plain words of the house.
+  const BRIEFING_BRIEF = `
+THE MORNING BRIEFING: Write this household's morning briefing from the records below. It will be read aloud, so write plain, warm, spoken sentences — no lists of codes, no jargon, no exclamation marks.
+- Open with the day and a one-line greeting using the reader's address name if one is given.
+- FIRST THINGS: anything overdue, then the most important thing due today. Name what it is and when it was due or is due.
+- TODAY: today's appointments and tasks, with times where the records give them.
+- COMING UP: tomorrow and the next few days, briefly.
+- WAITING: overdue items are things the household is still waiting to get done — say so plainly. If the records mention notes waiting for Jason, say how many are waiting for him.
+- DONE LATELY: what was finished in the last few days — what it was, when it was done, and whether it was finished for good or has more to do.
+Skip any section the records leave empty. Never invent a task, a time, a person, or a fact that is not in the records. Keep the whole briefing under about 180 words. Separate the sections with a blank line, and start each section (after the greeting) with its plain heading: "First things." / "Today." / "Coming up." / "Waiting." / "Done lately."`;
+
   const DESKS: Record<DeskId, Desk> = {
     records: {
       label: 'Records desk',
@@ -1191,6 +1205,88 @@ Answer with the desk id only.`;
     return actions.map((a) => docs[a]).join('\n          ');
   }
 
+
+  // The morning briefing (Jason, 2026-11-20): the client builds a
+  // summary of the day's records, this route makes the one model call,
+  // and the client saves the result — one call per household per day.
+  app.post('/api/assistant/briefing', async (req, res) => {
+    try {
+      const { context } = req.body as {
+        context?: {
+          userName?: string;
+          addressName?: string;
+          currentDateTime?: string;
+          briefingSummary?: string;
+        };
+      };
+      const ctx = context || {};
+      const summary = String(ctx.briefingSummary || '').slice(0, 6000);
+      if (!summary.trim()) {
+        res.status(400).json({ error: 'A summary of the day\'s records is required.' });
+        return;
+      }
+      const ai = getGenAIClient();
+      const requestPayload = {
+        model: DESK_MODEL,
+        contents: `Current Date/Time: ${ctx.currentDateTime || new Date().toISOString()}
+Reader: ${ctx.userName || 'Steward User'}${ctx.addressName ? `\nAddress them as: ${ctx.addressName}` : ''}
+
+THE HOUSEHOLD'S RECORDS FOR THE BRIEFING:
+${summary}
+
+Write the morning briefing now, following your brief exactly.`,
+        config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          systemInstruction:
+            'You are Steward, the household desk. You write the morning briefing from the household records you are given, and nothing else.' +
+            PLACE_TREE_BRIEF +
+            BRIEFING_BRIEF,
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              briefing: { type: Type.STRING },
+            },
+            required: ['briefing'],
+          },
+        },
+      };
+
+      let response;
+      try {
+        response = await ai.models.generateContent(requestPayload);
+      } catch (firstErr) {
+        const msg = firstErr instanceof Error ? firstErr.message : String(firstErr);
+        if (/503|UNAVAILABLE|high demand/i.test(msg)) {
+          await new Promise((r) => setTimeout(r, 1200));
+          response = await ai.models.generateContent(requestPayload);
+        } else {
+          throw firstErr;
+        }
+      }
+
+      const parsed = JSON.parse((response.text ?? '{}').trim()) as { briefing?: string };
+      const briefing = String(parsed.briefing || '').trim().slice(0, 4000);
+      if (!briefing) {
+        res.status(502).json({ error: 'The briefing came back empty.' });
+        return;
+      }
+      res.json({ briefing });
+    } catch (error) {
+      console.error('Morning briefing error:', error);
+      let readable =
+        error instanceof Error ? error.message : 'Failed to prepare the morning briefing.';
+      try {
+        const parsedErr = JSON.parse(readable) as { error?: { message?: string } };
+        if (parsedErr?.error?.message) {
+          readable = parsedErr.error.message;
+        }
+      } catch {
+        // keep the raw message
+      }
+      res.status(500).json({ error: readable });
+    }
+  });
 
   app.post('/api/assistant/chat', async (req, res) => {
     try {

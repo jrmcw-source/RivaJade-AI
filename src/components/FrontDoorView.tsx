@@ -16,6 +16,7 @@ import {
   HardDrive,
   ArrowRight,
   Plus,
+  Sunrise,
 } from 'lucide-react';
 import {
   CATEGORIES,
@@ -117,6 +118,8 @@ interface FrontDoorViewProps {
     remainderNote?: string
   ) => Promise<string | null>;
   onShowCalendar: (summary: string) => void;
+  briefingText: string | null;
+  onRequestBriefing: () => Promise<string | null>;
   onSaveMemory: (payload: {
     summary: string;
     followUpSteps: string[];
@@ -249,6 +252,8 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
     onCreateJasonNote,
     onCompleteTaskByTitle,
     onShowCalendar,
+    briefingText,
+    onRequestBriefing,
     onSaveMemory,
     onRecordBehaviorSignal,
   } = props;
@@ -260,6 +265,7 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [briefingBusy, setBriefingBusy] = useState(false);
   const [appliedActions, setAppliedActions] = useState<Record<string, boolean>>({});
   const [listening, setListening] = useState(false);
   const [liveStatus, setLiveStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
@@ -1227,6 +1233,45 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
   const voiceConnecting = liveStatus === 'connecting';
   const hearing = listening || voiceActive;
 
+  // The morning briefing (Jason, 2026-11-20): one big button on the
+  // door. The saved briefing shows and speaks at once; if today has
+  // none yet, App prepares it (one paid-tier call for the household's
+  // day) and then it shows and speaks.
+  async function handleBriefingButton() {
+    bumpActivity();
+    const showBriefing = (text: string) => {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `a_${Date.now()}`,
+          role: 'assistant' as const,
+          text,
+          choices: [],
+          suggestedActions: [],
+        },
+      ]);
+      setPhase('engaged');
+      speak(text);
+    };
+    if (briefingText) {
+      showBriefing(briefingText);
+      return;
+    }
+    setBriefingBusy(true);
+    try {
+      const text = await onRequestBriefing();
+      if (text) {
+        showBriefing(text);
+      } else {
+        setErrorMsg(
+          "I couldn't get this morning's briefing ready just now. Please try again in a little while."
+        );
+      }
+    } finally {
+      setBriefingBusy(false);
+    }
+  }
+
   function handleTalkButton() {
     bumpActivity();
     if (voiceActive || voiceConnecting) {
@@ -1425,6 +1470,16 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
             }`}
           >
             {hearing ? <Mic className="w-16 h-16" /> : <MicOff className="w-16 h-16" />}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void handleBriefingButton()}
+            disabled={briefingBusy}
+            className="w-full max-w-md min-h-[64px] inline-flex items-center justify-center gap-3 rounded-2xl border-2 border-teal-700 dark:border-teal-500 text-teal-800 dark:text-teal-200 text-xl font-semibold px-5 disabled:opacity-60"
+          >
+            <Sunrise className="w-7 h-7 shrink-0" />
+            <span>{briefingBusy ? 'Getting your briefing ready…' : "This morning's briefing"}</span>
           </button>
 
           {errorMsg && (
