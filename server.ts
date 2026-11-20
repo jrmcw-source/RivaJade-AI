@@ -993,14 +993,82 @@ SUPERVISOR RULES — these bind every desk, whatever the user asks:
 - The family's standing rule for its records: never offer more information than what is legally obligated. The most recent 3 years of any place are freely shown to the household. For anything older, or for any summary meant for someone outside the household, ask who it is for and which agency or purpose needs it before providing it.
 - Stay in your desk's lane. If part of a request belongs to another desk, say which desk it belongs to, answer only your part, and let the user ask that desk.`;
 
+  // Front door (Jason, 2026-11-20): the desks mostly serve one person at
+  // one big simple screen. She may be listening rather than reading, she
+  // answers by voice or by tapping big buttons, and a request the desk
+  // cannot fill is never a dead end — it becomes a note for Jason.
+  const FRONT_DOOR_RULES = `
+
+FRONT DOOR — how you speak with her (these bind every desk):
+- Address the user by the address name given in the request when one is provided (for Mom, "Ms. Gini"). Use it naturally, the way a person at a front desk would — in greetings, in confirmations, and when you ask her something.
+- Write every reply so it can be read aloud exactly as written: plain words, short sentences, no jargon, no markdown. She may be listening, not reading.
+- When you ask her a question whose answers are a small known set, put those answers in "choices" as short labels (at most 5) AND ask the question in your reply. The screen shows the choices as big buttons; she may tap one or answer in her own words — both count the same.
+- When you cannot do something she asked — it is outside this desk, outside the app, or not possible right now — never leave it there. Say plainly that you are sorry and that you cannot do that right now, say that you have noted the request and will talk to Jason about fixing it, and include a "note_for_jason" action whose payload says what she asked for. Never claim you did something you did not do.
+- End every completed piece of work by saying exactly what was done, naming the place and the branch it belongs to, so she can catch a mistake: what was filed or recorded, where it belongs, and what happens to it next.`;
+
+  // Everyday lane weather: a plain-word summary for one place, fetched
+  // from the National Weather Service (no key, no cost) only when the
+  // latest message is about the weather. Returns '' on any failure; the
+  // desk then answers with the can't-do wording instead of inventing a
+  // forecast.
+  async function fetchNwsEverydaySummary(
+    lat: number,
+    lon: number,
+    label: string
+  ): Promise<string> {
+    try {
+      const headers = {
+        'User-Agent': 'Steward-Everyday/1.0 (steward@local)',
+        Accept: 'application/geo+json',
+      };
+      const pointsRes = await fetch(`https://api.weather.gov/points/${lat},${lon}`, {
+        headers,
+      });
+      if (!pointsRes.ok) return '';
+      const pointsJson = (await pointsRes.json()) as {
+        properties?: { gridId?: string; gridX?: number; gridY?: number };
+      };
+      const gp = pointsJson.properties || {};
+      if (!gp.gridId || gp.gridX == null || gp.gridY == null) return '';
+      const fcRes = await fetch(
+        `https://api.weather.gov/gridpoints/${gp.gridId}/${gp.gridX},${gp.gridY}/forecast`,
+        { headers }
+      );
+      if (!fcRes.ok) return '';
+      const fcJson = (await fcRes.json()) as {
+        properties?: {
+          periods?: Array<{
+            name?: string;
+            temperature?: number;
+            shortForecast?: string;
+            probabilityOfPrecipitation?: { value?: number | null };
+          }>;
+        };
+      };
+      const periods = (fcJson.properties?.periods || []).slice(0, 4);
+      if (periods.length === 0) return '';
+      const lines = periods.map((per) => {
+        const rain = per.probabilityOfPrecipitation?.value;
+        return `${per.name || 'Coming up'}: ${per.shortForecast || 'fair'}, around ${Math.round(
+          per.temperature ?? 0
+        )} degrees${rain ? `, ${Math.round(rain)}% chance of rain` : ''}`;
+      });
+      return `${label} — ${lines.join('; ')}.`;
+    } catch {
+      return '';
+    }
+  }
+
   type DeskId = 'records' | 'appointments' | 'finance' | 'general';
-  type DeskSlice = 'tasks' | 'wimberley' | 'finances' | 'documents';
+  type DeskSlice = 'tasks' | 'wimberley' | 'finances' | 'documents' | 'everyday';
   type DeskAction =
     | 'create_task'
     | 'log_expense'
     | 'create_property_entry'
     | 'open_drive_backup'
-    | 'navigate';
+    | 'navigate'
+    | 'note_for_jason'
+    | 'capture_document';
   interface Desk {
     label: string;
     slices: DeskSlice[];
@@ -1012,15 +1080,17 @@ SUPERVISOR RULES — these bind every desk, whatever the user asks:
     records: {
       label: 'Records desk',
       slices: ['documents', 'wimberley'],
-      actions: ['create_property_entry', 'open_drive_backup', 'navigate'],
+      actions: ['create_property_entry', 'open_drive_backup', 'navigate', 'capture_document', 'note_for_jason'],
       brief: `
 
-YOUR DESK: Records. You handle the document vault and the property record: finding papers, saying where a paper is, what a document says, property entries and history, and Drive backups. You do not schedule appointments or record spending; those belong to the Appointments and Finance desks.`,
+YOUR DESK: Records. You handle the document vault and the property record: finding papers, saying where a paper is, what a document says, property entries and history, and Drive backups. You do not schedule appointments or record spending; those belong to the Appointments and Finance desks.
+
+CAPTURING A PAPER: when she wants to file a receipt or a paper, first settle where it belongs. If she names the place, use it. For Wimberley, if the branch is not clear, ask which branch it belongs to — the homestead, the rental cabin, or the conservancy — and offer exactly those as choices ("Homestead", "Rental Cabin", "Conservancy"). Once the place is settled, tell her you can file it for her as soon as she takes a picture of it, and offer the "capture_document" action with that place in its payload. The app opens the camera with the place already chosen, reads the paper, and files it under that place.`,
     },
     appointments: {
       label: 'Appointments desk',
       slices: ['tasks'],
-      actions: ['create_task', 'navigate'],
+      actions: ['create_task', 'navigate', 'note_for_jason'],
       brief: `
 
 YOUR DESK: Appointments. You handle the schedule: tasks, appointments, due dates, reminders, and what is coming up. You do not search the document vault or record spending; those belong to the Records and Finance desks.`,
@@ -1028,24 +1098,28 @@ YOUR DESK: Appointments. You handle the schedule: tasks, appointments, due dates
     finance: {
       label: 'Finance desk',
       slices: ['finances'],
-      actions: ['log_expense', 'navigate'],
+      actions: ['log_expense', 'navigate', 'note_for_jason'],
       brief: `
 
 YOUR DESK: Finance. You handle money records: logging expenses and income, totals and groupings, and the per-agency record windows in the place brief. You do not schedule appointments or search the document vault; those belong to the Appointments and Records desks.`,
     },
     general: {
       label: 'General desk',
-      slices: ['tasks', 'wimberley', 'finances', 'documents'],
+      slices: ['tasks', 'wimberley', 'finances', 'documents', 'everyday'],
       actions: [
         'create_task',
         'log_expense',
         'create_property_entry',
         'open_drive_backup',
         'navigate',
+        'note_for_jason',
+        'capture_document',
       ],
       brief: `
 
-YOUR DESK: General. This request spans more than one desk or does not fit one, so you have the whole workspace and every action. Handle it whole.`,
+YOUR DESK: General. This request spans more than one desk or does not fit one, so you have the whole workspace and every action. Handle it whole.
+
+THE EVERYDAY LANE: you also answer small everyday questions that are not about the records — the weather above all. When the snapshot carries live weather for her places (section 5), answer from it in plain words: what it is like now, what is coming, anything she should dress for or watch for. If no live weather was fetched, say so plainly, apologize, and note it for Jason like any request you cannot fill. Everyday answers never change the records, the money, or the calendar.`,
     },
   };
 
@@ -1097,6 +1171,8 @@ Answer with the desk id only.`;
       create_property_entry: `- "create_property_entry": {"title":string,"place":"Riva Jade"|"Riva Jade — Homestead"|"Riva Jade — Rental Cabin"|"Riva Jade — Wildlife Conservancy"|"Oakleaf"|"Elephant Walk"|"","area":"conservancy"|"cabin_maintenance"|"cabin_stay","status":"nominal"|"attention"|"urgent"|"upcoming"|"ready"|"completed","scheduledDate":"YYYY-MM-DD","cadence":"once"|"monthly"|"quarterly"|"seasonal"|"annual","inspectorOrGuest":string,"notes":string}`,
       open_drive_backup: `- "open_drive_backup": {"reason":string}`,
       navigate: `- "navigate": {"tab":"schedule"|"property"|"finances"|"vault"|"projects"|"voice"|"analytics"}`,
+      note_for_jason: `- "note_for_jason": {"request":string — what the user asked for that this desk could not do, in plain words}`,
+      capture_document: `- "capture_document": {"place":"Riva Jade"|"Riva Jade — Homestead"|"Riva Jade — Rental Cabin"|"Riva Jade — Wildlife Conservancy"|"Oakleaf"|"Elephant Walk"|""}`,
     };
     return actions.map((a) => docs[a]).join('\n          ');
   }
@@ -1108,6 +1184,7 @@ Answer with the desk id only.`;
         messages?: Array<{ role: 'user' | 'assistant'; text: string }>;
         context?: {
           userName?: string;
+          addressName?: string;
           currentDateTime?: string;
           tasksSummary?: string;
           wimberleySummary?: string;
@@ -1148,11 +1225,31 @@ Answer with the desk id only.`;
       const sumDocuments = desk.slices.includes('documents')
         ? ctx.documentsSummary || 'No scanned documents yet.'
         : 'Not shown to this desk.';
+      // Everyday lane: live weather for her two places, fetched only when
+      // the general desk takes the message and the message is about the
+      // weather. Any failure leaves the section empty, and the desk
+      // answers with the can't-do wording rather than a made-up forecast.
+      let everydaySummary = '';
+      if (
+        deskId === 'general' &&
+        /\b(weather|forecast|rain|raining|snow|temperature|cold|hot|freeze|storm|sunny|cloudy)\b/i.test(
+          lastUserMessage?.text || ''
+        )
+      ) {
+        const [wimberley, lafayette] = await Promise.all([
+          fetchNwsEverydaySummary(30.0024, -98.0986, 'Wimberley, Texas (Riva Jade)'),
+          fetchNwsEverydaySummary(30.2241, -92.0198, 'Lafayette, Louisiana (Oakleaf)'),
+        ]);
+        everydaySummary = [wimberley, lafayette].filter(Boolean).join('\n');
+      }
+      const sumEveryday = desk.slices.includes('everyday')
+        ? everydaySummary || 'No live weather was fetched for this message.'
+        : 'Not shown to this desk.';
       const actionDocs = actionDocLines(desk.actions);
       const requestPayload = {
         model: DESK_MODEL,
         contents: `Current Date/Time: ${ctx.currentDateTime || new Date().toISOString()}
-User: ${ctx.userName || 'Steward User'}
+User: ${ctx.userName || 'Steward User'}${ctx.addressName ? `\nAddress them as: ${ctx.addressName}` : ''}
 Google Drive Backup Status: ${ctx.driveConnected ? 'Connected in current session' : 'Not yet connected in this session (user can connect via Google Drive Backups)'}
 
 LIVE WORKSPACE SNAPSHOT:
@@ -1168,6 +1265,9 @@ ${sumFinances}
 4) OCR Document Vault:
 ${sumDocuments}
 
+5) Everyday — weather for her places (live only when fetched for this message):
+${sumEveryday}
+
 CONVERSATION:
 ${recentHistory}
 
@@ -1180,12 +1280,17 @@ ${actionDocs}`,
             'You are Steward AI Assistant, a knowledgeable, concise, practical household, Texas Hill Country property, and personal finance assistant. Ground every answer in the user workspace data provided. Never invent fake totals or documents. Use plain, helpful prose and only include suggestedActions when genuinely actionable.' +
             PLACE_TREE_BRIEF +
             SUPERVISOR_RULES +
-            desk.brief,
+            desk.brief +
+            FRONT_DOOR_RULES,
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
             properties: {
               reply: { type: Type.STRING },
+              choices: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+              },
               suggestedActions: {
                 type: Type.ARRAY,
                 items: {
@@ -1222,8 +1327,16 @@ ${actionDocs}`,
 
       const parsed = JSON.parse((response.text ?? '{}').trim()) as {
         reply?: string;
+        choices?: string[];
         suggestedActions?: Array<{
-          type: 'create_task' | 'log_expense' | 'create_property_entry' | 'open_drive_backup' | 'navigate';
+          type:
+            | 'create_task'
+            | 'log_expense'
+            | 'create_property_entry'
+            | 'open_drive_backup'
+            | 'navigate'
+            | 'note_for_jason'
+            | 'capture_document';
           label: string;
           payloadJson: string;
         }>;
@@ -1231,6 +1344,12 @@ ${actionDocs}`,
 
       res.json({
         reply: parsed.reply || 'I reviewed your workspace. How would you like to proceed?',
+        choices: Array.isArray(parsed.choices)
+          ? parsed.choices
+              .filter((c) => typeof c === 'string' && c.trim().length > 0)
+              .slice(0, 5)
+              .map((c) => c.slice(0, 60))
+          : [],
         suggestedActions: Array.isArray(parsed.suggestedActions)
           ? parsed.suggestedActions
               .filter((a) => desk.actions.includes(a.type))
@@ -1378,6 +1497,21 @@ ${actionDocs}`,
         required: ['title', 'amount', 'group'],
       },
     },
+    {
+      name: 'noteForJason',
+      description:
+        'Writes down a request the assistant cannot fill, so Jason can see it and fix it. Use whenever the user asks for something outside the available tools or not possible right now — after telling the user, in plain words, that you cannot do that right now and that you have noted it and will talk to Jason about fixing it.',
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          request: {
+            type: Type.STRING,
+            description: 'What the user asked for, in plain words.',
+          },
+        },
+        required: ['request'],
+      },
+    },
   ];
 
   wss.on('connection', (clientWs: WebSocket) => {
@@ -1396,6 +1530,7 @@ ${actionDocs}`,
           type?: string;
           context?: {
             userName?: string;
+            addressName?: string;
             currentDateTime?: string;
             pendingTasks?: string;
             completedTasks?: string;
@@ -1417,7 +1552,7 @@ ${actionDocs}`,
           const ai = getGenAIClient();
           const ctx = msg.context || {};
           const systemInstruction = `You are Steward, a warm, concise, proactive personal voice assistant for ${ctx.userName || 'the user'}.
-Current Local Date/Time: ${ctx.currentDateTime || new Date().toISOString()}
+${ctx.addressName ? `Address the user as ${ctx.addressName}. ` : ''}Current Local Date/Time: ${ctx.currentDateTime || new Date().toISOString()}
 
 MEMORY OF COMPLETED TASKS:
 ${ctx.completedTasks || 'None recorded yet.'}
@@ -1444,7 +1579,10 @@ Guidelines:
 - Proactively reference completed tasks when relevant and suggest logical next follow-up steps.
 - When asked about the family property in Wimberley, TX (conservancy or rental cabin), reference its live logged status and suggest 'Wimberley Property' tasks when scheduling follow-ups.
 - When the user mentions an expense or asks about spending (e.g., Medical - Mom, Medical - Jason, Conservancy, Home Repairs, Rental Upkeep, Groceries), answer from the summary or call logFinanceEntry.
-- When the user asks to add a task, complete a task, look up a scanned document, log a financial transaction, or save follow-up steps, call the appropriate tool immediately.`;
+- When the user asks to add a task, complete a task, look up a scanned document, log a financial transaction, or save follow-up steps, call the appropriate tool immediately.
+- If the user asks what she is supposed to press or do, reassure her by name: she does not have to press anything — you are here to help, and she can just say what she would like to do.
+- When you cannot do something she asked, never leave it there: say plainly that you are sorry and cannot do that right now, say you have noted the request and will talk to Jason about fixing it, and call noteForJason with what she asked for. Never claim you did something you did not do.
+- When a piece of work is finished, say exactly what was done, naming the place and branch it belongs to, so she can catch a mistake.`;
 
           liveSession = await ai.live.connect({
             model: 'gemini-3.8-live',

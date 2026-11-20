@@ -33,6 +33,8 @@ interface TranscriptTurn {
 
 interface GeminiLiveVoiceViewProps {
   userName: string;
+  addressName?: string;
+  onCreateJasonNote: (text: string) => Promise<void>;
   tasks: ScheduleTask[];
   documents: ScannedDocument[];
   memories: VoiceMemory[];
@@ -57,7 +59,7 @@ interface GeminiLiveVoiceViewProps {
   ) => Promise<void>;
 }
 
-function floatTo16BitPcmBase64(float32: Float32Array): string {
+export function floatTo16BitPcmBase64(float32: Float32Array): string {
   const buffer = new ArrayBuffer(float32.length * 2);
   const view = new DataView(buffer);
   for (let i = 0; i < float32.length; i++) {
@@ -73,7 +75,7 @@ function floatTo16BitPcmBase64(float32: Float32Array): string {
   return btoa(binary);
 }
 
-function base64PcmToFloat32(base64: string): Float32Array {
+export function base64PcmToFloat32(base64: string): Float32Array {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
@@ -90,6 +92,8 @@ function base64PcmToFloat32(base64: string): Float32Array {
 
 export const GeminiLiveVoiceView: React.FC<GeminiLiveVoiceViewProps> = ({
   userName,
+  addressName,
+  onCreateJasonNote,
   tasks,
   documents,
   memories,
@@ -318,6 +322,15 @@ export const GeminiLiveVoiceView: React.FC<GeminiLiveVoiceViewProps> = ({
         });
         appendTranscript('system', `Logged $${amount.toFixed(2)} under ${group} (${title}).`);
         resultPayload = { logged: true, title, amount, group, entryDate };
+      } else if (call.name === 'noteForJason') {
+        const request = String(call.args?.request || '').slice(0, 2000);
+        if (request) {
+          await onCreateJasonNote(request);
+          appendTranscript('system', 'Noted for Jason.');
+          resultPayload = { noted: true };
+        } else {
+          resultPayload = { noted: false, reason: 'Empty request.' };
+        }
       }
     } catch (err) {
       resultPayload = { error: err instanceof Error ? err.message : 'Tool execution error' };
@@ -402,6 +415,7 @@ export const GeminiLiveVoiceView: React.FC<GeminiLiveVoiceViewProps> = ({
             type: 'init',
             context: {
               userName,
+              addressName: addressName || '',
               currentDateTime: new Date().toLocaleString(),
               pendingTasks: pendingSummary,
               completedTasks: completedSummary,

@@ -211,6 +211,14 @@ export interface UserProfile {
   preferredFocusWindow: FocusWindow;
   prefersQuickWinsFirst: boolean;
   behaviorSignals: string[];
+  // Front door (Jason, 2026-11-20): how the desk addresses this user out
+  // loud and in text (for Mom: "Ms. Gini"), and whether the desk's spoken
+  // voice is muted for her. Both optional — older profiles simply lack
+  // them, and the door falls back to the display name and an unmuted
+  // voice. Mute persists on the profile so it holds across opens and
+  // devices (the church case: set it once, it stays set).
+  addressName?: string;
+  voiceMuted?: boolean;
   createdAt?: unknown;
   updatedAt?: unknown;
 }
@@ -272,6 +280,24 @@ export interface VoiceMemory {
   followUpSteps: string[];
   completedTaskTitles: string[];
   transcriptExcerpt: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+// A note for Jason (Jason's ruling, 2026-11-20): when the desk cannot do
+// something the user asked for, it never dead-ends. It apologizes in
+// plain words, says it cannot do that right now, and says it has noted
+// the request and will talk to Jason about fixing it — and the request
+// lands here, in the household's shared records, where Jason sees it.
+// `handled` is Jason's own check-off once he has dealt with one.
+export interface JasonNote {
+  id: string;
+  userId: string;
+  householdId: string;
+  memberIds: string[];
+  text: string;
+  source: string; // 'front_door' | 'assistant' | 'voice'
+  handled: boolean;
   createdAt?: unknown;
   updatedAt?: unknown;
 }

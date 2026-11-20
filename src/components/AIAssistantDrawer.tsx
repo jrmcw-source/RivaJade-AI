@@ -11,6 +11,7 @@ import {
   HardDrive,
   ArrowRight,
   Loader2,
+  Camera,
 } from 'lucide-react';
 import {
   CATEGORIES,
@@ -46,7 +47,9 @@ interface SuggestedAction {
     | 'log_expense'
     | 'create_property_entry'
     | 'open_drive_backup'
-    | 'navigate';
+    | 'navigate'
+    | 'note_for_jason'
+    | 'capture_document';
   label: string;
   payloadJson: string;
 }
@@ -55,6 +58,7 @@ interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   text: string;
+  choices?: string[];
   suggestedActions?: SuggestedAction[];
 }
 
@@ -81,6 +85,8 @@ interface AIAssistantDrawerProps {
   ) => Promise<void>;
   onOpenDriveBackup: () => void;
   onNavigate: (tab: AssistantNavTarget) => void;
+  onCreateJasonNote: (text: string) => Promise<void>;
+  onCaptureDocument: (place: string) => void;
 }
 
 const STARTER_PROMPTS = [
@@ -144,6 +150,8 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
   onCreatePropertyEntry,
   onOpenDriveBackup,
   onNavigate,
+  onCreateJasonNote,
+  onCaptureDocument,
 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -269,6 +277,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
       });
       const json = (await res.json()) as {
         reply?: string;
+        choices?: string[];
         suggestedActions?: SuggestedAction[];
         error?: string;
       };
@@ -276,13 +285,29 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
         throw new Error(json.error || `Assistant returned HTTP ${res.status}`);
       }
 
+      const actions = Array.isArray(json.suggestedActions) ? json.suggestedActions : [];
       const assistantMsg: ChatMessage = {
         id: `a_${Date.now()}`,
         role: 'assistant',
         text: json.reply || 'Done.',
-        suggestedActions: Array.isArray(json.suggestedActions) ? json.suggestedActions : [],
+        choices: Array.isArray(json.choices) ? json.choices : [],
+        suggestedActions: actions,
       };
       setMessages((prev) => [...prev, assistantMsg]);
+
+      // A note for Jason is filed the moment the desk says it has noted
+      // the request — no tap needed, the words and the record agree.
+      for (let i = 0; i < actions.length; i++) {
+        if (actions[i].type === 'note_for_jason') {
+          try {
+            const payload = JSON.parse(actions[i].payloadJson || '{}') as { request?: string };
+            await onCreateJasonNote(String(payload.request || trimmed).slice(0, 2000));
+            setAppliedActions((prev) => ({ ...prev, [`${assistantMsg.id}_${i}`]: true }));
+          } catch {
+            setErrorMsg('That note for Jason could not be saved just now.');
+          }
+        }
+      }
       setTimeout(() => scrollEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 40);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Unable to reach Steward AI Assistant.');
@@ -380,6 +405,11 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
       } else if (action.type === 'open_drive_backup') {
         onClose();
         onOpenDriveBackup();
+      } else if (action.type === 'capture_document') {
+        onClose();
+        onCaptureDocument(isPlaceName(payload.place) ? payload.place : '');
+      } else if (action.type === 'note_for_jason') {
+        await onCreateJasonNote(String(payload.request || action.label).slice(0, 2000));
       } else if (action.type === 'navigate') {
         const rawTab = String(payload.tab || 'schedule');
         if ((VALID_NAV_TABS as readonly string[]).includes(rawTab)) {
@@ -401,6 +431,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
     if (type === 'log_expense') return <Wallet className="w-3.5 h-3.5 shrink-0" />;
     if (type === 'create_property_entry') return <Trees className="w-3.5 h-3.5 shrink-0" />;
     if (type === 'open_drive_backup') return <HardDrive className="w-3.5 h-3.5 shrink-0" />;
+    if (type === 'capture_document') return <Camera className="w-3.5 h-3.5 shrink-0" />;
     return <ArrowRight className="w-3.5 h-3.5 shrink-0" />;
   }
 
@@ -507,11 +538,29 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
                     {msg.text}
                   </div>
 
+                  {msg.role === 'assistant' && msg.choices && msg.choices.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {msg.choices.map((choice) => (
+                        <button
+                          key={choice}
+                          type="button"
+                          onClick={() => void sendMessage(choice)}
+                          className="min-h-[40px] inline-flex items-center px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-teal-700 hover:bg-teal-800 text-white transition-colors"
+                        >
+                          {choice}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
                   {msg.role === 'assistant' &&
                     msg.suggestedActions &&
                     msg.suggestedActions.length > 0 && (
                       <div className="flex flex-wrap gap-2">
-                        {msg.suggestedActions.map((act, idx) => {
+                        {msg.suggestedActions
+                          .map((act, idx) => ({ act, idx }))
+                          .filter(({ act }) => act.type !== 'note_for_jason')
+                          .map(({ act, idx }) => {
                           const actionKey = `${msg.id}_${idx}`;
                           const done = Boolean(appliedActions[actionKey]);
                           return (
@@ -534,7 +583,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
                               <span>{done ? `${act.label} — Applied` : act.label}</span>
                             </button>
                           );
-                        })}
+                          })}
                       </div>
                     )}
                 </div>

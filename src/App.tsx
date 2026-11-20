@@ -32,6 +32,9 @@ import {
   Download,
   HardDrive,
   Sparkles,
+  Home,
+  Check,
+  Trash2,
 } from 'lucide-react';
 import {
   OperationType,
@@ -55,6 +58,7 @@ import {
   FocusWindow,
   Household,
   HouseholdMember,
+  JasonNote,
   ProjectInvite,
   ProjectMember,
   ProjectTask,
@@ -78,6 +82,7 @@ import { WimberleyPropertyView } from './components/WimberleyPropertyView';
 import { FinancesView } from './components/FinancesView';
 import { GoogleDriveBackupModal } from './components/GoogleDriveBackupModal';
 import { AIAssistantDrawer } from './components/AIAssistantDrawer';
+import { FrontDoorView, FrontDoorDeskId } from './components/FrontDoorView';
 import {
   ensureStewardPhotosFolder,
   listDriveBackups,
@@ -88,6 +93,7 @@ import { PWAInstallModalTrigger } from './components/PWAInstallModal';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 
 type NavTab =
+  | 'frontdoor'
   | 'schedule'
   | 'property'
   | 'finances'
@@ -142,6 +148,18 @@ function withDocumentDefaults(
   };
 }
 
+function withJasonNoteDefaults(
+  rec: Omit<JasonNote, 'id'>
+): Omit<JasonNote, 'id'> {
+  const base = withHouseholdDefaults(rec);
+  return {
+    ...base,
+    text: base.text || '',
+    source: base.source || 'front_door',
+    handled: Boolean(base.handled),
+  };
+}
+
 function mergeRecordsById<T extends { id: string }>(own: T[], shared: T[]): T[] {
   const map = new Map<string, T>();
   shared.forEach((r) => map.set(r.id, r));
@@ -164,6 +182,15 @@ function MainApp() {
   const [driveBackupOpen, setDriveBackupOpen] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [driveConnected, setDriveConnected] = useState(false);
+  // Front door (2026-11-20): the big simple screen is the app's entrance.
+  // It opens on arrival; her CLOSE button puts it away, and the Front
+  // Desk nav item brings it back. The notice carries a spoken
+  // confirmation into the door (a filing, after a picture is saved).
+  const [frontDoorOpen, setFrontDoorOpen] = useState(true);
+  const [frontDoorNotice, setFrontDoorNotice] = useState<{ id: number; text: string } | null>(null);
+  const [scannerPresetPlace, setScannerPresetPlace] = useState('');
+  const capturePresetArmedRef = useRef(false);
+  const [showHandledNotes, setShowHandledNotes] = useState(false);
 
   // Cloud-synced Firestore state
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -182,6 +209,8 @@ function MainApp() {
   const [sharedPropertyEntries, setSharedPropertyEntries] = useState<PropertyEntry[]>([]);
   const [ownFinanceEntries, setOwnFinanceEntries] = useState<FinanceEntry[]>([]);
   const [sharedFinanceEntries, setSharedFinanceEntries] = useState<FinanceEntry[]>([]);
+  const [ownJasonNotes, setOwnJasonNotes] = useState<JasonNote[]>([]);
+  const [sharedJasonNotes, setSharedJasonNotes] = useState<JasonNote[]>([]);
   const [households, setHouseholds] = useState<Household[]>([]);
   const [selectedHouseholdId, setSelectedHouseholdId] = useState<string>('');
   const [selectedPlace, setSelectedPlace] = useState<string>('');
@@ -195,6 +224,8 @@ function MainApp() {
   // Settings form state
   const [editUsername, setEditUsername] = useState('');
   const [usernameFeedback, setUsernameFeedback] = useState<string | null>(null);
+  const [editAddressName, setEditAddressName] = useState('');
+  const [addressNameFeedback, setAddressNameFeedback] = useState<string | null>(null);
 
   type VoiceMemoryState = {
     id: string;
@@ -309,6 +340,7 @@ function MainApp() {
           const data = snap.data() as UserProfile;
           setUserProfile(data);
           setEditUsername(data.username);
+          setEditAddressName(data.addressName || '');
         }
       },
       (err) => handleFirestoreError(err, OperationType.GET, `users/${user.uid}`)
@@ -374,6 +406,32 @@ function MainApp() {
         );
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'voiceMemories')
+    );
+
+    const unsubJasonNotes = onSnapshot(
+      query(collection(db, 'jasonNotes'), where('userId', '==', user.uid)),
+      (snap) => {
+        setOwnJasonNotes(
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...withJasonNoteDefaults(d.data() as Omit<JasonNote, 'id'>),
+          }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'jasonNotes')
+    );
+
+    const unsubJasonNotesShared = onSnapshot(
+      query(collection(db, 'jasonNotes'), where('memberIds', 'array-contains', user.uid)),
+      (snap) => {
+        setSharedJasonNotes(
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...withJasonNoteDefaults(d.data() as Omit<JasonNote, 'id'>),
+          }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'jasonNotes')
     );
 
     const unsubProjects = onSnapshot(
@@ -532,6 +590,8 @@ function MainApp() {
       unsubDocs();
       unsubDocsShared();
       unsubMemories();
+      unsubJasonNotes();
+      unsubJasonNotesShared();
       unsubProjects();
       unsubInvitesEmail();
       unsubInvitesUid();
@@ -653,6 +713,10 @@ function MainApp() {
     () => mergeRecordsById(ownFinanceEntries, sharedFinanceEntries),
     [ownFinanceEntries, sharedFinanceEntries]
   );
+  const jasonNotes = useMemo(
+    () => mergeRecordsById(ownJasonNotes, sharedJasonNotes),
+    [ownJasonNotes, sharedJasonNotes]
+  );
 
   // What the views show: my private records plus the active household's.
   // The full merged lists above still feed Drive backup, restore, and the
@@ -681,6 +745,11 @@ function MainApp() {
     () => financeEntries.filter((f) => householdInScope(f.householdId)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [financeEntries, activeHousehold, households]
+  );
+  const visibleJasonNotes = useMemo(
+    () => jasonNotes.filter((n) => householdInScope(n.householdId)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [jasonNotes, activeHousehold, households]
   );
 
   // The place filter: choosing a branch shows that branch and everything
@@ -988,6 +1057,95 @@ function MainApp() {
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
     }
+  }
+
+  // Front door handlers (2026-11-20)
+  async function handleCreateJasonNote(text: string, source: string) {
+    if (!user) return;
+    const id = createSafeId('note');
+    const stamp = householdStamp();
+    try {
+      await setDoc(doc(db, 'jasonNotes', id), {
+        userId: user.uid,
+        householdId: stamp.householdId,
+        memberIds: stamp.memberIds,
+        text: text.slice(0, 2000),
+        source: source.slice(0, 40),
+        handled: false,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `jasonNotes/${id}`);
+    }
+  }
+
+  async function handleToggleJasonNoteHandled(note: JasonNote) {
+    try {
+      await updateDoc(doc(db, 'jasonNotes', note.id), {
+        handled: !note.handled,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `jasonNotes/${note.id}`);
+    }
+  }
+
+  async function handleDeleteJasonNote(noteId: string) {
+    try {
+      await deleteDoc(doc(db, 'jasonNotes', noteId));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `jasonNotes/${noteId}`);
+    }
+  }
+
+  async function handleUpdateDeskPrefs(updates: { addressName?: string; voiceMuted?: boolean }) {
+    if (!user) return;
+    try {
+      await updateDoc(doc(db, 'users', user.uid), {
+        ...updates,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
+    }
+  }
+
+  // The answering desk's screen opens behind the front door panel.
+  function handleDeskEngaged(desk: FrontDoorDeskId) {
+    if (desk === 'records') setActiveTab('vault');
+    else if (desk === 'appointments') setActiveTab('schedule');
+    else if (desk === 'finance') setActiveTab('finances');
+  }
+
+  // She asked the desk to file a paper and the branch is settled: close
+  // the door so the camera has the whole screen, open the vault scanner
+  // with the place already chosen.
+  function handleCaptureDocument(place: string) {
+    capturePresetArmedRef.current = true;
+    setScannerPresetPlace(place);
+    setActiveTab('vault');
+    setScannerTriggerCount((c) => c + 1);
+    setFrontDoorOpen(false);
+  }
+
+  // The vault saved a paper that came from the front door's camera: the
+  // door comes back and tells her, in words, exactly what was filed.
+  function handleFrontDoorDocumentSaved(info: { title: string; place: string }) {
+    if (!capturePresetArmedRef.current) return;
+    capturePresetArmedRef.current = false;
+    const p = info.place || scannerPresetPlace;
+    const placePhrase = p.startsWith('Riva Jade — ')
+      ? `the ${p.replace('Riva Jade — ', '').toLowerCase()} in Wimberley`
+      : p === 'Riva Jade'
+        ? 'Wimberley'
+        : p || 'the desk';
+    setScannerPresetPlace('');
+    setFrontDoorNotice({
+      id: Date.now(),
+      text: `We're done. I've filed "${info.title}" under ${placePhrase}. I've read it and added it to the records for you.`,
+    });
+    setFrontDoorOpen(true);
   }
 
   // Document Vault Handlers
@@ -2041,6 +2199,7 @@ function MainApp() {
     icon: React.ReactNode;
     badge?: number;
   }> = [
+    { id: 'frontdoor', label: 'Front Desk', mobileLabel: 'Front Desk', icon: <Home className="w-4 h-4" /> },
     { id: 'schedule', label: 'Schedule', icon: <Calendar className="w-4 h-4" /> },
     {
       id: 'property',
@@ -2062,7 +2221,7 @@ function MainApp() {
   ];
 
   const mobileBottomItems = navItems.filter((item) =>
-    ['schedule', 'property', 'finances', 'vault', 'voice'].includes(item.id)
+    ['frontdoor', 'schedule', 'property', 'finances', 'vault', 'voice'].includes(item.id)
   );
 
   return (
@@ -2318,7 +2477,69 @@ function MainApp() {
             </div>
           )}
 
-          {activeTab === 'schedule' && (
+          {visibleJasonNotes.length > 0 && (
+            <div className="mb-6 bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-800 rounded-xl p-5 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                  Notes for Jason ({visibleJasonNotes.filter((n) => !n.handled).length} waiting)
+                </h2>
+                {visibleJasonNotes.some((n) => n.handled) && (
+                  <button
+                    type="button"
+                    onClick={() => setShowHandledNotes((s) => !s)}
+                    className="text-xs font-medium text-teal-700 dark:text-teal-400 hover:underline"
+                  >
+                    {showHandledNotes ? 'Hide handled' : 'Show handled'}
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Requests the desk could not fill, written down instead of dead-ending.
+              </p>
+              <ul className="space-y-2">
+                {visibleJasonNotes
+                  .filter((n) => showHandledNotes || !n.handled)
+                  .map((note) => (
+                    <li
+                      key={note.id}
+                      className="flex items-start justify-between gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900"
+                    >
+                      <span
+                        className={`text-sm leading-relaxed ${
+                          note.handled
+                            ? 'line-through text-slate-400 dark:text-slate-500'
+                            : 'text-slate-800 dark:text-slate-100'
+                        }`}
+                      >
+                        {note.text}
+                      </span>
+                      <span className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => void handleToggleJasonNoteHandled(note)}
+                          title={note.handled ? 'Mark as waiting' : 'Mark as handled'}
+                          aria-label={note.handled ? 'Mark note as waiting' : 'Mark note as handled'}
+                          className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center rounded-lg text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/40"
+                        >
+                          <Check className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteJasonNote(note.id)}
+                          title="Remove note"
+                          aria-label="Remove note"
+                          className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </span>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          )}
+
+          {(activeTab === 'schedule' || activeTab === 'frontdoor') && (
             <ScheduleAndCalendarView
               userProfile={userProfile}
               tasks={displayTasks}
@@ -2366,6 +2587,8 @@ function MainApp() {
               onDeleteDocument={handleDeleteDocument}
               onCreateTaskFromDoc={handleCreateTask}
               scannerTriggerCount={scannerTriggerCount}
+              scannerPresetPlace={scannerPresetPlace}
+              onDocumentSaved={handleFrontDoorDocumentSaved}
             />
           )}
 
@@ -2393,6 +2616,8 @@ function MainApp() {
           {activeTab === 'voice' && (
             <GeminiLiveVoiceView
               userName={userProfile?.displayName || user.displayName || 'User'}
+              addressName={userProfile?.addressName || ''}
+              onCreateJasonNote={(text) => handleCreateJasonNote(text, 'voice')}
               tasks={displayTasks}
               documents={displayDocuments}
               memories={voiceMemories}
@@ -2420,7 +2645,7 @@ function MainApp() {
 
       {/* Mobile Bottom Tab Bar (iOS & Android thumb zone <= 15% height) */}
       <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 pb-safe">
-        <div className="grid grid-cols-5 h-16 items-center">
+        <div className="grid grid-cols-6 h-16 items-center">
           {mobileBottomItems.map((item) => {
             const active = activeTab === item.id;
             return (
@@ -2490,6 +2715,56 @@ function MainApp() {
               {usernameFeedback && (
                 <p className="text-xs text-teal-700 dark:text-teal-400">{usernameFeedback}</p>
               )}
+            </form>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void handleUpdateDeskPrefs({
+                  addressName: editAddressName.trim().slice(0, 80),
+                }).then(() => {
+                  setAddressNameFeedback('Saved.');
+                  window.setTimeout(() => setAddressNameFeedback(null), 2500);
+                });
+              }}
+              className="space-y-2"
+            >
+              <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                How Steward addresses you (the front door greeting — for example, Ms. Gini)
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={editAddressName}
+                  onChange={(e) => setEditAddressName(e.target.value)}
+                  placeholder="Leave blank to use your name"
+                  className="flex-1 min-h-[42px] px-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                />
+                <button
+                  type="submit"
+                  className="min-h-[42px] inline-flex items-center gap-1.5 px-3.5 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-lg"
+                >
+                  <UserCheck className="w-3.5 h-3.5" />
+                  <span>Save</span>
+                </button>
+              </div>
+              {addressNameFeedback && (
+                <p className="text-xs text-teal-700 dark:text-teal-400">{addressNameFeedback}</p>
+              )}
+              <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400 pt-1">
+                <input
+                  type="checkbox"
+                  checked={Boolean(userProfile?.voiceMuted)}
+                  onChange={(e) =>
+                    void handleUpdateDeskPrefs({ voiceMuted: e.target.checked })
+                  }
+                  className="mt-0.5"
+                />
+                <span>
+                  Keep the front door's spoken voice muted. It stays muted — in church, say —
+                  until it is turned back on here or on the front door itself.
+                </span>
+              </label>
             </form>
 
             <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
@@ -2799,7 +3074,39 @@ function MainApp() {
         onCreatePropertyEntry={handleCreatePropertyEntry}
         onOpenDriveBackup={() => setDriveBackupOpen(true)}
         onNavigate={setActiveTab}
+        onCreateJasonNote={(text) => handleCreateJasonNote(text, 'assistant')}
+        onCaptureDocument={handleCaptureDocument}
       />
+
+      {/* The Front Door — the big simple screen (2026-11-20) */}
+      {frontDoorOpen && (
+        <FrontDoorView
+          userName={userProfile?.displayName || user.displayName || 'User'}
+          addressName={userProfile?.addressName || ''}
+          voiceMuted={Boolean(userProfile?.voiceMuted)}
+          onToggleMuted={() =>
+            void handleUpdateDeskPrefs({ voiceMuted: !userProfile?.voiceMuted })
+          }
+          onClose={() => setFrontDoorOpen(false)}
+          tasks={visibleTasks}
+          propertyEntries={visiblePropertyEntries}
+          financeEntries={visibleFinanceEntries}
+          documents={visibleDocuments}
+          driveConnected={driveConnected}
+          notice={frontDoorNotice}
+          onCreateTask={handleCreateTask}
+          onLogFinanceEntry={handleCreateFinanceEntry}
+          onCreatePropertyEntry={handleCreatePropertyEntry}
+          onOpenDriveBackup={() => setDriveBackupOpen(true)}
+          onNavigate={setActiveTab}
+          onDeskEngaged={handleDeskEngaged}
+          onCaptureDocument={handleCaptureDocument}
+          onCreateJasonNote={handleCreateJasonNote}
+          onCompleteTaskByTitle={handleCompleteTaskByTitle}
+          onSaveMemory={handleSaveVoiceMemory}
+          onRecordBehaviorSignal={handleRecordBehaviorSignal}
+        />
+      )}
 
       {/* Offline Mode Banner */}
       {!isOnline && (

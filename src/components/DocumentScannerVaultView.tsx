@@ -49,6 +49,11 @@ interface DocumentScannerVaultViewProps {
     >
   ) => Promise<void>;
   scannerTriggerCount: number;
+  // Front door capture (2026-11-20): when the desk has already settled
+  // the branch with her, the scan is filed under that place, and the app
+  // is told once the save lands so the door can confirm it in words.
+  scannerPresetPlace?: string;
+  onDocumentSaved?: (info: { title: string; place: string }) => void;
 }
 
 function highlightMatch(text: string, query: string): React.ReactNode {
@@ -86,6 +91,8 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
   onDeleteDocument,
   onCreateTaskFromDoc,
   scannerTriggerCount,
+  scannerPresetPlace,
+  onDocumentSaved,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTag, setActiveTag] = useState<string>('All');
@@ -317,7 +324,12 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
         selectedTaskIndices: selectedMap,
         notes: '',
         paperLocation: '',
-        place: isPlaceName(data.place) ? data.place : '',
+        place:
+          scannerPresetPlace && isPlaceName(scannerPresetPlace)
+            ? scannerPresetPlace
+            : isPlaceName(data.place)
+              ? data.place
+              : '',
       });
     } catch (err) {
       setOcrError(err instanceof Error ? err.message : 'OCR extraction failed.');
@@ -372,6 +384,10 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
         }
       }
 
+      onDocumentSaved?.({
+        title: draftResult.title.trim() || 'Scanned Document',
+        place: draftResult.place,
+      });
       setSelectedDocId(newDocId);
       closeScanner();
     } finally {
