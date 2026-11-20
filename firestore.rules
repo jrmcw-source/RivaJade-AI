@@ -222,6 +222,8 @@ service cloud.firestore {
           'helpSteps',
           'linkedDocumentId',
           'place',
+          'completionState',
+          'remainderNote',
           'completedAtIso',
           'createdAt',
           'updatedAt'
@@ -257,6 +259,9 @@ service cloud.firestore {
         && data.linkedDocumentId is string
         && data.get('place', '') is string
         && data.get('place', '').size() <= 60
+        && data.get('completionState', 'finished') in ['finished', 'more']
+        && data.get('remainderNote', '') is string
+        && data.get('remainderNote', '').size() <= 300
         && data.linkedDocumentId.size() <= 128
         && data.completedAtIso is string
         && data.completedAtIso.size() <= 40

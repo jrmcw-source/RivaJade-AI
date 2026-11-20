@@ -7,6 +7,7 @@ import {
   Volume2,
   VolumeX,
   Camera,
+  Calendar,
   Check,
   Loader2,
   Moon,
@@ -66,7 +67,9 @@ interface SuggestedAction {
     | 'open_drive_backup'
     | 'navigate'
     | 'note_for_jason'
-    | 'capture_document';
+    | 'capture_document'
+    | 'complete_task'
+    | 'show_calendar';
   label: string;
   payloadJson: string;
 }
@@ -108,7 +111,12 @@ interface FrontDoorViewProps {
   onDeskEngaged: (desk: FrontDoorDeskId) => void;
   onCaptureDocument: (place: string) => void;
   onCreateJasonNote: (text: string, source: string) => Promise<void>;
-  onCompleteTaskByTitle: (titleQuery: string) => Promise<string | null>;
+  onCompleteTaskByTitle: (
+    titleQuery: string,
+    completionState?: 'finished' | 'more',
+    remainderNote?: string
+  ) => Promise<string | null>;
+  onShowCalendar: (summary: string) => void;
   onSaveMemory: (payload: {
     summary: string;
     followUpSteps: string[];
@@ -168,6 +176,56 @@ function safeIsoDate(raw: unknown): string {
   return getLocalTodayIso();
 }
 
+// The short version of the calendar, in plain spoken words: anything
+// overdue, what is on today, and what comes next. Built from the live
+// task list at the moment she asks, so it is never stale.
+function buildCalendarSummary(tasks: ScheduleTask[], addressName: string): string {
+  const today = getLocalTodayIso();
+  const name = (addressName || '').trim();
+  const fmtDay = (iso: string) =>
+    new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+    });
+  const fmtTime = (t: string) => {
+    if (!t) return '';
+    const [h, m] = t.split(':').map(Number);
+    if (Number.isNaN(h)) return '';
+    const d = new Date();
+    d.setHours(h, m || 0);
+    return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  };
+  const byWhen = (a: ScheduleTask, b: ScheduleTask) =>
+    a.dueDate.localeCompare(b.dueDate) ||
+    (a.dueTime || '99:99').localeCompare(b.dueTime || '99:99');
+  const pending = tasks.filter((t) => t.status === 'pending');
+  const overdue = pending.filter((t) => t.dueDate < today).sort(byWhen);
+  const todays = pending.filter((t) => t.dueDate === today).sort(byWhen);
+  const next = pending.filter((t) => t.dueDate > today).sort(byWhen)[0];
+  const parts: string[] = [name ? `Here's your calendar, ${name}.` : "Here's your calendar."];
+  if (overdue.length > 0) {
+    parts.push(
+      `There ${overdue.length === 1 ? 'is' : 'are'} ${overdue.length} overdue — the oldest is "${overdue[0].title}," from ${fmtDay(overdue[0].dueDate)}.`
+    );
+  }
+  if (todays.length > 0) {
+    const list = todays
+      .slice(0, 3)
+      .map((t) => `${t.title}${t.dueTime ? ` at ${fmtTime(t.dueTime)}` : ''}`)
+      .join('; ');
+    parts.push(`Today: ${list}${todays.length > 3 ? `, and ${todays.length - 3} more` : ''}.`);
+  } else {
+    parts.push('Nothing is on the calendar for today.');
+  }
+  if (next) {
+    parts.push(
+      `Next is "${next.title}" on ${fmtDay(next.dueDate)}${next.dueTime ? ` at ${fmtTime(next.dueTime)}` : ''}.`
+    );
+  }
+  return parts.join(' ');
+}
+
 export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
   const {
     userName,
@@ -190,6 +248,7 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
     onCaptureDocument,
     onCreateJasonNote,
     onCompleteTaskByTitle,
+    onShowCalendar,
     onSaveMemory,
     onRecordBehaviorSignal,
   } = props;
@@ -264,7 +323,16 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
     const completed = tasks
       .filter((t) => t.status === 'completed')
       .slice(0, 12)
-      .map((t) => `- ${t.title} (${t.category}, completed ${t.completedAtIso.slice(0, 10)})`)
+      .map(
+        (t) =>
+          `- ${t.title} (${t.category}, completed ${t.completedAtIso.slice(0, 10)}${
+            t.completionState === 'more'
+              ? `, MORE TO DO${t.remainderNote ? `: ${t.remainderNote}` : ''}`
+              : t.completionState === 'finished'
+                ? ', finished'
+                : ''
+          })`
+      )
       .join('\n');
     const wimberleySummary = propertyEntries
       .slice(0, 25)
@@ -570,7 +638,11 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
         });
         resultPayload = { created: true, title: args.title, dueDate, category: cat };
       } else if (call.name === 'markTaskCompleted') {
-        const matched = await onCompleteTaskByTitle(String(call.args?.taskTitle || ''));
+        const matched = await onCompleteTaskByTitle(
+          String(call.args?.taskTitle || ''),
+          call.args?.completionState === 'more' ? 'more' : 'finished',
+          String(call.args?.remainderNote || '')
+        );
         resultPayload = matched
           ? { completed: true, matchedTitle: matched }
           : { completed: false, reason: 'No matching pending task found.' };
@@ -678,7 +750,16 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
         const completedSummary = tasksRef.current
           .filter((t) => t.status === 'completed')
           .slice(0, 15)
-          .map((t) => `- ${t.title} (${t.category}, completed ${t.completedAtIso || t.dueDate})`)
+          .map(
+            (t) =>
+              `- ${t.title} (${t.category}, completed ${t.completedAtIso || t.dueDate}${
+                t.completionState === 'more'
+                  ? `, MORE TO DO${t.remainderNote ? `: ${t.remainderNote}` : ''}`
+                  : t.completionState === 'finished'
+                    ? ', finished'
+                    : ''
+              })`
+          )
           .join('\n');
         const docsSummary = documentsRef.current
           .slice(0, 15)
@@ -819,6 +900,22 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
   async function sendMessage(textToSend: string, via: 'voice' | 'typed' | 'button') {
     const trimmed = textToSend.trim();
     if (!trimmed || sendingRef.current) return;
+
+    // Just looking is its own request. "Show me the calendar" steps the
+    // door aside and puts the calendar in front of her, with the short
+    // version read aloud — no desk round-trip, nothing to answer.
+    if (
+      /\b(show me|let me see|take me to|open|bring up)\b.*\b(calendar|schedule)\b/i.test(trimmed) ||
+      /\b(see|look at)\b.*\b(calendar|schedule)\b/i.test(trimmed) ||
+      /^(the\s+)?(calendar|schedule)\.?$/i.test(trimmed)
+    ) {
+      bumpActivity();
+      recordChannel(via);
+      stopListening();
+      onShowCalendar(buildCalendarSummary(tasksRef.current, addressName));
+      return;
+    }
+
     bumpActivity();
     recordChannel(via);
     setPhase('engaged');
@@ -862,7 +959,16 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
 
       // A note for Jason is filed the moment the desk says it has noted
       // the request — her word for it is the desk's word, no tap needed.
+      // Showing the calendar is the same: she asked to look, so the
+      // calendar comes forward on the desk's say-so, and the short
+      // version App reads aloud replaces this reply's speech.
+      let calendarShown = false;
       for (let i = 0; i < actions.length; i++) {
+        if (actions[i].type === 'show_calendar') {
+          calendarShown = true;
+          setAppliedActions((prev) => ({ ...prev, [`${assistantMsg.id}_${i}`]: true }));
+          onShowCalendar(buildCalendarSummary(tasksRef.current, addressName));
+        }
         if (actions[i].type === 'note_for_jason') {
           try {
             const payload = JSON.parse(actions[i].payloadJson || '{}') as { request?: string };
@@ -882,7 +988,7 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
         onDeskEngaged(json.desk);
       }
       bumpActivity();
-      speak(assistantMsg.text);
+      if (!calendarShown) speak(assistantMsg.text);
       setTimeout(() => scrollEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 40);
     } catch (err) {
       setErrorMsg(
@@ -991,6 +1097,15 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
         onCaptureDocument(place);
       } else if (action.type === 'note_for_jason') {
         await onCreateJasonNote(String(payload.request || action.label).slice(0, 2000), 'front_door');
+      } else if (action.type === 'complete_task') {
+        const matched = await onCompleteTaskByTitle(
+          String(payload.titleQuery || action.label),
+          payload.completionState === 'more' ? 'more' : 'finished',
+          typeof payload.remainderNote === 'string' ? payload.remainderNote.slice(0, 300) : ''
+        );
+        if (!matched) throw new Error('I could not find that open item to mark done.');
+      } else if (action.type === 'show_calendar') {
+        onShowCalendar(buildCalendarSummary(tasksRef.current, addressName));
       }
 
       setAppliedActions((prev) => ({ ...prev, [actionKey]: true }));
@@ -1005,6 +1120,8 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
     if (type === 'create_property_entry') return <Trees className="w-6 h-6 shrink-0" />;
     if (type === 'open_drive_backup') return <HardDrive className="w-6 h-6 shrink-0" />;
     if (type === 'capture_document') return <Camera className="w-6 h-6 shrink-0" />;
+    if (type === 'complete_task') return <Check className="w-6 h-6 shrink-0" />;
+    if (type === 'show_calendar') return <Calendar className="w-6 h-6 shrink-0" />;
     return <ArrowRight className="w-6 h-6 shrink-0" />;
   }
 

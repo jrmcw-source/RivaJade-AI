@@ -199,6 +199,7 @@ export function isPlaceName(value: unknown): value is PlaceName {
 export type TaskType = 'task' | 'appointment';
 export type TaskPriority = 'low' | 'medium' | 'high';
 export type TaskStatus = 'pending' | 'completed';
+export type TaskCompletionState = 'finished' | 'more';
 export type FocusWindow = 'morning' | 'afternoon' | 'evening' | 'balanced';
 
 export interface UserProfile {
@@ -242,6 +243,8 @@ export interface ScheduleTask {
   helpSteps: string[];
   linkedDocumentId: string;
   completedAtIso: string;
+  completionState?: TaskCompletionState;
+  remainderNote?: string;
   createdAt?: unknown;
   updatedAt?: unknown;
 }

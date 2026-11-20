@@ -5,6 +5,7 @@ import {
   Send,
   Trash2,
   Check,
+  Calendar,
   Plus,
   Wallet,
   Trees,
@@ -49,7 +50,9 @@ interface SuggestedAction {
     | 'open_drive_backup'
     | 'navigate'
     | 'note_for_jason'
-    | 'capture_document';
+    | 'capture_document'
+    | 'complete_task'
+    | 'show_calendar';
   label: string;
   payloadJson: string;
 }
@@ -87,6 +90,11 @@ interface AIAssistantDrawerProps {
   onNavigate: (tab: AssistantNavTarget) => void;
   onCreateJasonNote: (text: string) => Promise<void>;
   onCaptureDocument: (place: string) => void;
+  onCompleteTaskByTitle: (
+    titleQuery: string,
+    completionState?: 'finished' | 'more',
+    remainderNote?: string
+  ) => Promise<string | null>;
 }
 
 const STARTER_PROMPTS = [
@@ -152,6 +160,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
   onNavigate,
   onCreateJasonNote,
   onCaptureDocument,
+  onCompleteTaskByTitle,
 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -180,7 +189,16 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
     const completed = tasks
       .filter((t) => t.status === 'completed')
       .slice(0, 12)
-      .map((t) => `- ${t.title} (${t.category}, completed ${t.completedAtIso.slice(0, 10)})`)
+      .map(
+        (t) =>
+          `- ${t.title} (${t.category}, completed ${t.completedAtIso.slice(0, 10)}${
+            t.completionState === 'more'
+              ? `, MORE TO DO${t.remainderNote ? `: ${t.remainderNote}` : ''}`
+              : t.completionState === 'finished'
+                ? ', finished'
+                : ''
+          })`
+      )
       .join('\n');
 
     const wimberleySummary = propertyEntries
@@ -410,6 +428,16 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
         onCaptureDocument(isPlaceName(payload.place) ? payload.place : '');
       } else if (action.type === 'note_for_jason') {
         await onCreateJasonNote(String(payload.request || action.label).slice(0, 2000));
+      } else if (action.type === 'complete_task') {
+        const matched = await onCompleteTaskByTitle(
+          String(payload.titleQuery || action.label),
+          payload.completionState === 'more' ? 'more' : 'finished',
+          typeof payload.remainderNote === 'string' ? payload.remainderNote.slice(0, 300) : ''
+        );
+        if (!matched) throw new Error('No matching open task found to mark done.');
+      } else if (action.type === 'show_calendar') {
+        onNavigate('schedule');
+        onClose();
       } else if (action.type === 'navigate') {
         const rawTab = String(payload.tab || 'schedule');
         if ((VALID_NAV_TABS as readonly string[]).includes(rawTab)) {
@@ -432,6 +460,8 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
     if (type === 'create_property_entry') return <Trees className="w-3.5 h-3.5 shrink-0" />;
     if (type === 'open_drive_backup') return <HardDrive className="w-3.5 h-3.5 shrink-0" />;
     if (type === 'capture_document') return <Camera className="w-3.5 h-3.5 shrink-0" />;
+    if (type === 'complete_task') return <Check className="w-3.5 h-3.5 shrink-0" />;
+    if (type === 'show_calendar') return <Calendar className="w-3.5 h-3.5 shrink-0" />;
     return <ArrowRight className="w-3.5 h-3.5 shrink-0" />;
   }
 

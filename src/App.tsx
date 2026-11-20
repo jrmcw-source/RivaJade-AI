@@ -3,6 +3,7 @@ import { User, onAuthStateChanged } from 'firebase/auth';
 import {
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   onSnapshot,
@@ -1011,10 +1012,62 @@ function MainApp() {
         await updateDoc(doc(db, 'tasks', task.id), {
           status: 'pending',
           completedAtIso: '',
+          completionState: deleteField(),
+          remainderNote: deleteField(),
           householdId: task.householdId || '',
           memberIds:
             task.memberIds && task.memberIds.length > 0 ? task.memberIds : [task.userId],
           updatedAt: serverTimestamp(),
+        });
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `tasks/${task.id}`);
+    }
+  }
+
+  // Completion with the finished-or-more answer recorded. "More" keeps
+  // the remainder on the books: a fresh open item for today, named for
+  // what is left, so it surfaces in the ticker and the Today lists
+  // instead of vanishing with the done item.
+  async function handleCompleteTask(
+    task: ScheduleTask,
+    completionState: 'finished' | 'more',
+    remainderNote: string
+  ) {
+    if (!user) return;
+    try {
+      const nowIso = new Date().toISOString();
+      await updateDoc(doc(db, 'tasks', task.id), {
+        status: 'completed',
+        completedAtIso: nowIso,
+        completionState,
+        remainderNote: completionState === 'more' ? remainderNote.slice(0, 300) : '',
+        householdId: task.householdId || '',
+        memberIds:
+          task.memberIds && task.memberIds.length > 0 ? task.memberIds : [task.userId],
+        updatedAt: serverTimestamp(),
+      });
+      await handleRecordBehaviorSignal(
+        `Completed "${task.title}" (${task.category}) on ${getLocalTodayIso()} — ${
+          completionState === 'more'
+            ? `more to do: ${remainderNote || 'unspecified'}`
+            : 'finished'
+        }.`
+      );
+      if (completionState === 'more') {
+        await handleCreateTask({
+          title: (remainderNote || `More on: ${task.title}`).slice(0, 200),
+          category: task.category,
+          type: task.type,
+          place: task.place || '',
+          dueDate: getLocalTodayIso(),
+          dueTime: '',
+          estimatedMinutes: task.estimatedMinutes,
+          reminderMinutes: task.reminderMinutes,
+          priority: task.priority,
+          notes: `What is left of "${task.title}" — marked done ${getLocalTodayIso()} with more to do.`,
+          helpSteps: [],
+          linkedDocumentId: '',
         });
       }
     } catch (err) {
@@ -1596,14 +1649,38 @@ function MainApp() {
   }
 
   // Voice Memory Handlers
-  async function handleCompleteTaskByTitle(titleQuery: string): Promise<string | null> {
+  async function handleCompleteTaskByTitle(
+    titleQuery: string,
+    completionState: 'finished' | 'more' = 'finished',
+    remainderNote = ''
+  ): Promise<string | null> {
     const q = titleQuery.trim().toLowerCase();
     const match = tasks.find(
       (t) => t.status === 'pending' && t.title.toLowerCase().includes(q)
     );
     if (!match) return null;
-    await handleToggleTaskComplete(match);
+    await handleCompleteTask(match, completionState, remainderNote);
     return match.title;
+  }
+
+  // Browsing is its own request: the calendar comes forward and the
+  // short version is read aloud from here, because the front door has
+  // stepped aside by the time the words are spoken.
+  function handleShowCalendar(summary: string) {
+    setActiveTab('schedule');
+    setFrontDoorOpen(false);
+    if (userProfile?.voiceMuted) return;
+    try {
+      if (!('speechSynthesis' in window)) return;
+      const clean = summary.replace(/[*#`_>]/g, '').replace(/\s+/g, ' ').trim();
+      if (!clean) return;
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(clean.slice(0, 600));
+      utterance.rate = 1;
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      // Speech is a courtesy layer; the calendar is already on screen.
+    }
   }
 
   async function handleSaveVoiceMemory(payload: {
@@ -2543,11 +2620,13 @@ function MainApp() {
             <ScheduleAndCalendarView
               userProfile={userProfile}
               tasks={displayTasks}
+              allTasks={visibleTasks}
               sharedTasks={sharedTasksWithProject}
               documents={displayDocuments}
               onCreateTask={handleCreateTask}
               onUpdateTask={handleUpdateTask}
               onToggleTaskComplete={handleToggleTaskComplete}
+              onCompleteTask={handleCompleteTask}
               onDeleteTask={handleDeleteTask}
               onRecordBehaviorSignal={handleRecordBehaviorSignal}
               onUpdateFocusPrefs={handleUpdateFocusPrefs}
@@ -3076,6 +3155,7 @@ function MainApp() {
         onNavigate={setActiveTab}
         onCreateJasonNote={(text) => handleCreateJasonNote(text, 'assistant')}
         onCaptureDocument={handleCaptureDocument}
+        onCompleteTaskByTitle={handleCompleteTaskByTitle}
       />
 
       {/* The Front Door — the big simple screen (2026-11-20) */}
@@ -3103,6 +3183,7 @@ function MainApp() {
           onCaptureDocument={handleCaptureDocument}
           onCreateJasonNote={handleCreateJasonNote}
           onCompleteTaskByTitle={handleCompleteTaskByTitle}
+          onShowCalendar={handleShowCalendar}
           onSaveMemory={handleSaveVoiceMemory}
           onRecordBehaviorSignal={handleRecordBehaviorSignal}
         />

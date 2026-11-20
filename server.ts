@@ -1068,7 +1068,9 @@ FRONT DOOR — how you speak with her (these bind every desk):
     | 'open_drive_backup'
     | 'navigate'
     | 'note_for_jason'
-    | 'capture_document';
+    | 'capture_document'
+    | 'complete_task'
+    | 'show_calendar';
   interface Desk {
     label: string;
     slices: DeskSlice[];
@@ -1090,10 +1092,16 @@ CAPTURING A PAPER: when she wants to file a receipt or a paper, first settle whe
     appointments: {
       label: 'Appointments desk',
       slices: ['tasks'],
-      actions: ['create_task', 'navigate', 'note_for_jason'],
+      actions: ['create_task', 'complete_task', 'show_calendar', 'navigate', 'note_for_jason'],
       brief: `
 
-YOUR DESK: Appointments. You handle the schedule: tasks, appointments, due dates, reminders, and what is coming up. You do not search the document vault or record spending; those belong to the Records and Finance desks.`,
+YOUR DESK: Appointments. You handle the schedule: tasks, appointments, due dates, reminders, and what is coming up. You do not search the document vault or record spending; those belong to the Records and Finance desks.
+
+FINISHED, OR MORE TO DO: when she says she has done something on the schedule, do not simply mark it. If she has not said whether that is the end of it, ask once — "Is that finished, or is there more to do on it later?" — with choices "Finished with it" and "There's more to do". Then offer the "complete_task" action carrying her answer: completionState "finished", or "more" with remainderNote naming what is left, in her words. The app marks the item done, and when there is more, puts what is left back on the schedule as a new open item for today, so nothing is lost.
+
+DID I ALREADY: when she asks whether she already did something, answer from the Recent Completed list in the snapshot: name what it was, the day it was done, and whether it was finished for good or has more to do — and if more, what the more is. If it is not on that list, say you do not see it done; never guess.
+
+SEEING THE CALENDAR: when she asks to see or look at the calendar itself — not to hear what is on it, but to look at it — offer the "show_calendar" action. The app puts the calendar in front of her and reads her the short version.`,
     },
     finance: {
       label: 'Finance desk',
@@ -1108,6 +1116,8 @@ YOUR DESK: Finance. You handle money records: logging expenses and income, total
       slices: ['tasks', 'wimberley', 'finances', 'documents', 'everyday'],
       actions: [
         'create_task',
+        'complete_task',
+        'show_calendar',
         'log_expense',
         'create_property_entry',
         'open_drive_backup',
@@ -1119,13 +1129,15 @@ YOUR DESK: Finance. You handle money records: logging expenses and income, total
 
 YOUR DESK: General. This request spans more than one desk or does not fit one, so you have the whole workspace and every action. Handle it whole.
 
-THE EVERYDAY LANE: you also answer small everyday questions that are not about the records — the weather above all. When the snapshot carries live weather for her places (section 5), answer from it in plain words: what it is like now, what is coming, anything she should dress for or watch for. If no live weather was fetched, say so plainly, apologize, and note it for Jason like any request you cannot fill. Everyday answers never change the records, the money, or the calendar.`,
+THE EVERYDAY LANE: you also answer small everyday questions that are not about the records — the weather above all. When the snapshot carries live weather for her places (section 5), answer from it in plain words: what it is like now, what is coming, anything she should dress for or watch for. If no live weather was fetched, say so plainly, apologize, and note it for Jason like any request you cannot fill. Everyday answers never change the records, the money, or the calendar.
+
+Marking things done, answering "did I already" questions, and showing her the calendar follow the same rules as the Appointments desk: ask finished-or-more before marking anything done and offer "complete_task" with her answer, answer did-I-already only from the Recent Completed list, and offer "show_calendar" when she wants to look at the calendar itself.`,
     },
   };
 
   const DESK_ROUTER_BRIEF = `You route one household message to exactly one desk.
 - "records": finding or reading papers and documents, where a paper is, property entries and property history, backups.
-- "appointments": scheduling, tasks, appointments, due dates, reminders, what is coming up.
+- "appointments": scheduling, tasks, appointments, due dates, reminders, what is coming up, what she has already done, marking things done, and seeing the calendar.
 - "finance": money — spending, income, totals, bills, record windows for an agency.
 - "general": anything mixed, unclear, or outside the other three.
 Answer with the desk id only.`;
@@ -1173,6 +1185,8 @@ Answer with the desk id only.`;
       navigate: `- "navigate": {"tab":"schedule"|"property"|"finances"|"vault"|"projects"|"voice"|"analytics"}`,
       note_for_jason: `- "note_for_jason": {"request":string — what the user asked for that this desk could not do, in plain words}`,
       capture_document: `- "capture_document": {"place":"Riva Jade"|"Riva Jade — Homestead"|"Riva Jade — Rental Cabin"|"Riva Jade — Wildlife Conservancy"|"Oakleaf"|"Elephant Walk"|""}`,
+      complete_task: `- "complete_task": {"titleQuery":string — words from the title of the open item she says is done,"completionState":"finished"|"more","remainderNote":string — what is left to do, in her words, or ""}`,
+      show_calendar: `- "show_calendar": {"reason":string}`,
     };
     return actions.map((a) => docs[a]).join('\n          ');
   }
@@ -1336,7 +1350,9 @@ ${actionDocs}`,
             | 'open_drive_backup'
             | 'navigate'
             | 'note_for_jason'
-            | 'capture_document';
+            | 'capture_document'
+            | 'complete_task'
+            | 'show_calendar';
           label: string;
           payloadJson: string;
         }>;
@@ -1435,11 +1451,13 @@ ${actionDocs}`,
     },
     {
       name: 'markTaskCompleted',
-      description: 'Marks an existing pending task as completed by matching its title.',
+      description: 'Marks an existing pending task as completed by matching its title. If she has not said whether that is the end of it, ask first — is that finished, or is there more to do on it later? — and pass her answer as completionState; when there is more, remainderNote names what is left in her words and the app puts it back on the schedule as a new open item for today.',
       parameters: {
         type: Type.OBJECT,
         properties: {
           taskTitle: { type: Type.STRING },
+          completionState: { type: Type.STRING, enum: ['finished', 'more'] },
+          remainderNote: { type: Type.STRING },
         },
         required: ['taskTitle'],
       },
@@ -1581,6 +1599,8 @@ Guidelines:
 - When the user mentions an expense or asks about spending (e.g., Medical - Mom, Medical - Jason, Conservancy, Home Repairs, Rental Upkeep, Groceries), answer from the summary or call logFinanceEntry.
 - When the user asks to add a task, complete a task, look up a scanned document, log a financial transaction, or save follow-up steps, call the appropriate tool immediately.
 - If the user asks what she is supposed to press or do, reassure her by name: she does not have to press anything — you are here to help, and she can just say what she would like to do.
+- When she says she has done something on the schedule and has not said whether that is the end of it, ask once before calling markTaskCompleted: is that finished, or is there more to do on it later? Pass her answer as completionState ("finished" or "more") and, when there is more, remainderNote naming what is left in her words.
+- When she asks whether she already did something, answer from the completed tasks in your context: name what it was, the day it was done, and whether it was finished or has more to do. If it is not there, say you do not see it done — never guess.
 - When you cannot do something she asked, never leave it there: say plainly that you are sorry and cannot do that right now, say you have noted the request and will talk to Jason about fixing it, and call noteForJason with what she asked for. Never claim you did something you did not do.
 - When a piece of work is finished, say exactly what was done, naming the place and branch it belongs to, so she can catch a mistake.`;
 

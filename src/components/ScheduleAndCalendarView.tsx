@@ -5,6 +5,8 @@ import {
   Circle,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Clock,
   Bell,
   HelpCircle,
@@ -40,11 +42,17 @@ import { downloadIcsCalendar } from '../services/calendarExport';
 interface ScheduleAndCalendarViewProps {
   userProfile: UserProfile | null;
   tasks: ScheduleTask[];
+  allTasks: ScheduleTask[];
   sharedTasks: Array<ProjectTask & { projectName: string }>;
   documents: ScannedDocument[];
   onCreateTask: (payload: Omit<ScheduleTask, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'completedAtIso' | 'status' | 'householdId' | 'memberIds'>) => Promise<void>;
   onUpdateTask: (taskId: string, updates: Partial<ScheduleTask>) => Promise<void>;
   onToggleTaskComplete: (task: ScheduleTask) => Promise<void>;
+  onCompleteTask: (
+    task: ScheduleTask,
+    completionState: 'finished' | 'more',
+    remainderNote: string
+  ) => Promise<void>;
   onDeleteTask: (taskId: string) => Promise<void>;
   onRecordBehaviorSignal: (signal: string) => Promise<void>;
   onUpdateFocusPrefs: (preferredFocusWindow: FocusWindow, prefersQuickWinsFirst: boolean) => Promise<void>;
@@ -54,11 +62,13 @@ interface ScheduleAndCalendarViewProps {
 export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = ({
   userProfile,
   tasks,
+  allTasks,
   sharedTasks,
   documents,
   onCreateTask,
   onUpdateTask,
   onToggleTaskComplete,
+  onCompleteTask,
   onDeleteTask,
   onRecordBehaviorSignal,
   onUpdateFocusPrefs,
@@ -359,6 +369,70 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
 
   const monthLabel = currentMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 
+  // -- The one ticker (FleetSheet law, carried over): this page only, --
+  // -- pulling every pool at once — overdue, today, tomorrow, next up. --
+  const [tickerOpen, setTickerOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('steward-ticker-open') !== 'closed';
+    } catch {
+      return true;
+    }
+  });
+  const [tickerExpanded, setTickerExpanded] = useState(false);
+  const toggleTicker = () => {
+    setTickerOpen((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('steward-ticker-open', next ? 'open' : 'closed');
+      } catch {
+        // storage unavailable (private mode) — the state still toggles
+      }
+      return next;
+    });
+  };
+  const tickerItems = useMemo(() => {
+    const fmtDay = (iso: string) =>
+      new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+      });
+    const fmtTime = (t: string) => {
+      if (!t) return '';
+      const [h, m] = t.split(':').map(Number);
+      if (Number.isNaN(h)) return '';
+      const d = new Date();
+      d.setHours(h, m || 0);
+      return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    };
+    const byWhen = (a: ScheduleTask, b: ScheduleTask) =>
+      a.dueDate.localeCompare(b.dueDate) ||
+      (a.dueTime || '99:99').localeCompare(b.dueTime || '99:99');
+    const tomorrowDate = new Date(`${todayIso}T12:00:00`);
+    tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+    const tomorrowIso = `${tomorrowDate.getFullYear()}-${String(tomorrowDate.getMonth() + 1).padStart(2, '0')}-${String(tomorrowDate.getDate()).padStart(2, '0')}`;
+    const pending = allTasks.filter((t) => t.status === 'pending');
+    const items: Array<{ key: string; label: string; title: string; overdue: boolean }> = [];
+    for (const t of pending.filter((t) => t.dueDate < todayIso).sort(byWhen)) {
+      items.push({ key: t.id, label: `Overdue · was due ${fmtDay(t.dueDate)}`, title: t.title, overdue: true });
+    }
+    for (const t of pending.filter((t) => t.dueDate === todayIso).sort(byWhen)) {
+      items.push({ key: t.id, label: t.dueTime ? `Today · ${fmtTime(t.dueTime)}` : 'Today', title: t.title, overdue: false });
+    }
+    for (const t of pending.filter((t) => t.dueDate === tomorrowIso).sort(byWhen)) {
+      items.push({ key: t.id, label: 'Tomorrow', title: t.title, overdue: false });
+    }
+    for (const t of pending.filter((t) => t.dueDate > tomorrowIso).sort(byWhen).slice(0, 3)) {
+      items.push({ key: t.id, label: fmtDay(t.dueDate), title: t.title, overdue: false });
+    }
+    return items;
+  }, [allTasks, todayIso]);
+
+  // -- Completing a task asks one question first: finished, or more? --
+  const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
+  const [moreMode, setMoreMode] = useState(false);
+  const [moreNote, setMoreNote] = useState('');
+
   return (
     <div className="space-y-6">
       {/* Sub-view Bar */}
@@ -408,6 +482,60 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
             </button>
           </div>
         </div>
+      </div>
+
+      {/* The one ticker — this page only */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+        <button
+          type="button"
+          onClick={toggleTicker}
+          aria-expanded={tickerOpen}
+          className="w-full min-h-[52px] flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors"
+        >
+          <span className="text-base font-semibold text-slate-900 dark:text-slate-100">
+            Coming up{tickerItems.length > 0 ? ` (${tickerItems.length})` : ''}
+          </span>
+          {tickerOpen ? (
+            <ChevronUp className="w-5 h-5 text-slate-500 shrink-0" />
+          ) : (
+            <ChevronDown className="w-5 h-5 text-slate-500 shrink-0" />
+          )}
+        </button>
+        {tickerOpen && (
+          <div className="border-t border-slate-200 dark:border-slate-800 px-4 py-3 space-y-2">
+            {tickerItems.length === 0 ? (
+              <p className="text-base text-slate-600 dark:text-slate-300">
+                Nothing overdue, and nothing due today or tomorrow.
+              </p>
+            ) : (
+              <>
+                {(tickerExpanded ? tickerItems : tickerItems.slice(0, 5)).map((item) => (
+                  <p key={item.key} className="text-base leading-snug text-slate-800 dark:text-slate-100">
+                    <span
+                      className={`font-semibold ${
+                        item.overdue
+                          ? 'text-red-600 dark:text-red-400'
+                          : 'text-teal-700 dark:text-teal-400'
+                      }`}
+                    >
+                      {item.label}
+                    </span>{' '}
+                    — {item.title}
+                  </p>
+                ))}
+                {tickerItems.length > 5 && (
+                  <button
+                    type="button"
+                    onClick={() => setTickerExpanded((v) => !v)}
+                    className="min-h-[44px] px-2 -ml-2 text-base font-medium text-teal-700 dark:text-teal-400 hover:underline"
+                  >
+                    {tickerExpanded ? 'Show less' : `+ ${tickerItems.length - 5} more`}
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {subMode === 'calendar' ? (
@@ -612,7 +740,17 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
                       <div className="flex items-start gap-3">
                         <button
                           type="button"
-                          onClick={() => onToggleTaskComplete(task)}
+                          onClick={() => {
+                            if (task.status === 'completed') {
+                              void onToggleTaskComplete(task);
+                            } else if (completingTaskId === task.id) {
+                              setCompletingTaskId(null);
+                            } else {
+                              setCompletingTaskId(task.id);
+                              setMoreMode(false);
+                              setMoreNote('');
+                            }
+                          }}
                           aria-label={
                             task.status === 'completed' ? 'Reopen task' : 'Complete task'
                           }
@@ -681,6 +819,80 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
                             <div className="mt-2 inline-flex items-center gap-1.5 text-xs text-teal-700 dark:text-teal-400 font-medium">
                               <FileText className="w-3.5 h-3.5" />
                               <span>Linked document: {linkedDoc.title}</span>
+                            </div>
+                          )}
+
+                          {task.status === 'completed' && task.completedAtIso && (
+                            <p className="mt-2 text-sm font-medium text-slate-600 dark:text-slate-300">
+                              Done{' '}
+                              {new Date(task.completedAtIso).toLocaleDateString(undefined, {
+                                weekday: 'short',
+                                month: 'short',
+                                day: 'numeric',
+                              })}
+                              {task.completionState === 'finished'
+                                ? ' — Finished. Nothing left on it.'
+                                : task.completionState === 'more'
+                                  ? ` — More to do${task.remainderNote ? `: ${task.remainderNote}` : ' later.'}`
+                                  : ''}
+                            </p>
+                          )}
+
+                          {task.status === 'pending' && completingTaskId === task.id && (
+                            <div className="mt-3 rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-950/40 p-4 space-y-3">
+                              <p className="text-base font-medium text-slate-900 dark:text-slate-100">
+                                Is "{task.title}" finished, or is there more to do on it later?
+                              </p>
+                              {!moreMode ? (
+                                <div className="flex flex-col sm:flex-row gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      void onCompleteTask(task, 'finished', '');
+                                      setCompletingTaskId(null);
+                                    }}
+                                    className="flex-1 min-h-[52px] px-4 py-2.5 text-base font-semibold text-white bg-teal-700 hover:bg-teal-800 rounded-lg transition-colors"
+                                  >
+                                    Finished
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setMoreMode(true)}
+                                    className="flex-1 min-h-[52px] px-4 py-2.5 text-base font-semibold text-teal-900 dark:text-teal-100 bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-700 hover:bg-teal-100 dark:hover:bg-teal-900/50 rounded-lg transition-colors"
+                                  >
+                                    More to do later
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="space-y-2.5">
+                                  <input
+                                    type="text"
+                                    value={moreNote}
+                                    onChange={(e) => setMoreNote(e.target.value)}
+                                    placeholder="What's left to do? (you can leave this blank)"
+                                    className="w-full min-h-[48px] px-3.5 py-2 text-base bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-700"
+                                  />
+                                  <div className="flex flex-col sm:flex-row gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        void onCompleteTask(task, 'more', moreNote.trim());
+                                        setCompletingTaskId(null);
+                                      }}
+                                      className="flex-1 min-h-[52px] px-4 py-2.5 text-base font-semibold text-white bg-teal-700 hover:bg-teal-800 rounded-lg transition-colors"
+                                    >
+                                      Save — more to do
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setMoreMode(false)}
+                                      className="min-h-[52px] px-4 py-2.5 text-base font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                                    >
+                                      Back
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           )}
 

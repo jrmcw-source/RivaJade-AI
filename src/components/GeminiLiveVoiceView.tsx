@@ -46,7 +46,11 @@ interface GeminiLiveVoiceViewProps {
       'id' | 'userId' | 'createdAt' | 'updatedAt' | 'completedAtIso' | 'status' | 'householdId' | 'memberIds'
     >
   ) => Promise<void>;
-  onCompleteTaskByTitle: (titleQuery: string) => Promise<string | null>;
+  onCompleteTaskByTitle: (
+    titleQuery: string,
+    completionState?: 'finished' | 'more',
+    remainderNote?: string
+  ) => Promise<string | null>;
   onSaveMemory: (payload: {
     summary: string;
     followUpSteps: string[];
@@ -245,7 +249,11 @@ export const GeminiLiveVoiceView: React.FC<GeminiLiveVoiceViewProps> = ({
         resultPayload = { created: true, title: args.title, dueDate, category: cat };
       } else if (call.name === 'markTaskCompleted') {
         const taskTitle = String(call.args?.taskTitle || '');
-        const matched = await onCompleteTaskByTitle(taskTitle);
+        const matched = await onCompleteTaskByTitle(
+          taskTitle,
+          call.args?.completionState === 'more' ? 'more' : 'finished',
+          String(call.args?.remainderNote || '')
+        );
         if (matched) {
           appendTranscript('system', `Marked "${matched}" as completed.`);
           resultPayload = { completed: true, matchedTitle: matched };
@@ -376,7 +384,16 @@ export const GeminiLiveVoiceView: React.FC<GeminiLiveVoiceViewProps> = ({
         const completedSummary = tasksRef.current
           .filter((t) => t.status === 'completed')
           .slice(0, 15)
-          .map((t) => `- ${t.title} (${t.category}, completed ${t.completedAtIso || t.dueDate})`)
+          .map(
+            (t) =>
+              `- ${t.title} (${t.category}, completed ${t.completedAtIso || t.dueDate}${
+                t.completionState === 'more'
+                  ? `, MORE TO DO${t.remainderNote ? `: ${t.remainderNote}` : ''}`
+                  : t.completionState === 'finished'
+                    ? ', finished'
+                    : ''
+              })`
+          )
           .join('\n');
 
         const memoriesSummary = memories
