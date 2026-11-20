@@ -54,8 +54,40 @@ export function clearDriveAccessToken(): void {
 onAuthStateChanged(auth, (user) => {
   if (!user) {
     setDriveAccessToken(null);
+    clearGmailAccessToken();
   }
 });
+
+// Gmail (Jason, 2026-11-20): a separate read-only mail token, granted
+// only when a user turns on their own email toggle and taps Connect.
+// It lives in memory only, exactly like the Drive token, and is never
+// written to any storage. The provider used for it carries ONLY the
+// gmail.readonly scope, so the consent ask is mail reading and
+// nothing else.
+let cachedGmailAccessToken: string | null = null;
+
+export function getGmailAccessToken(): string | null {
+  return cachedGmailAccessToken;
+}
+
+export function clearGmailAccessToken(): void {
+  cachedGmailAccessToken = null;
+}
+
+export async function connectGmail(): Promise<string> {
+  const mailProvider = new GoogleAuthProvider();
+  mailProvider.addScope('https://www.googleapis.com/auth/gmail.readonly');
+  const current = auth.currentUser;
+  const result = current
+    ? await reauthenticateWithPopup(current, mailProvider)
+    : await signInWithPopup(auth, mailProvider);
+  const credential = GoogleAuthProvider.credentialFromResult(result);
+  if (!credential?.accessToken) {
+    throw new Error('Gmail access token was not granted. Please try again.');
+  }
+  cachedGmailAccessToken = credential.accessToken;
+  return credential.accessToken;
+}
 
 export enum OperationType {
   CREATE = 'create',
@@ -145,5 +177,6 @@ export async function connectGoogleDrive(): Promise<string> {
 
 export async function signOutUser() {
   setDriveAccessToken(null);
+  clearGmailAccessToken();
   return signOut(auth);
 }

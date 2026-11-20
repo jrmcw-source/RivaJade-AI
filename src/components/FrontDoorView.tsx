@@ -120,6 +120,8 @@ interface FrontDoorViewProps {
   onShowCalendar: (summary: string) => void;
   briefingText: string | null;
   onRequestBriefing: () => Promise<string | null>;
+  mailBriefingText: string | null;
+  onRequestMailBriefing: () => Promise<string | null>;
   onSaveMemory: (payload: {
     summary: string;
     followUpSteps: string[];
@@ -254,6 +256,8 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
     onShowCalendar,
     briefingText,
     onRequestBriefing,
+    mailBriefingText,
+    onRequestMailBriefing,
     onSaveMemory,
     onRecordBehaviorSignal,
   } = props;
@@ -1239,34 +1243,34 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
   // day) and then it shows and speaks.
   async function handleBriefingButton() {
     bumpActivity();
-    const showBriefing = (text: string) => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `a_${Date.now()}`,
-          role: 'assistant' as const,
-          text,
-          choices: [],
-          suggestedActions: [],
-        },
-      ]);
-      setPhase('engaged');
-      speak(text);
-    };
-    if (briefingText) {
-      showBriefing(briefingText);
-      return;
-    }
     setBriefingBusy(true);
     try {
-      const text = await onRequestBriefing();
-      if (text) {
-        showBriefing(text);
-      } else {
+      const sharedText = briefingText || (await onRequestBriefing());
+      if (!sharedText) {
         setErrorMsg(
           "I couldn't get this morning's briefing ready just now. Please try again in a little while."
         );
+        return;
       }
+      // The personal mail add-on follows the shared briefing when the
+      // reader's own email switch is on — it is theirs alone, and it
+      // never becomes part of the household's briefing.
+      const mailText = mailBriefingText || (await onRequestMailBriefing());
+      const push = (text: string) =>
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `a_${Date.now()}_${Math.random()}`,
+            role: 'assistant' as const,
+            text,
+            choices: [],
+            suggestedActions: [],
+          },
+        ]);
+      push(sharedText);
+      if (mailText) push(mailText);
+      setPhase('engaged');
+      speak(mailText ? `${sharedText}\n\n${mailText}` : sharedText);
     } finally {
       setBriefingBusy(false);
     }

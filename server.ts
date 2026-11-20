@@ -1092,6 +1092,21 @@ THE MORNING BRIEFING: Write this household's morning briefing from the records b
 - DONE LATELY: what was finished in the last few days — what it was, when it was done, and whether it was finished for good or has more to do.
 Skip any section the records leave empty. Never invent a task, a time, a person, or a fact that is not in the records. Keep the whole briefing under about 180 words. Separate the sections with a blank line, and start each section (after the greeting) with its plain heading: "First things." / "Today." / "Coming up." / "Waiting." / "Done lately."`;
 
+  // The personal mail add-on's brief (Jason, 2026-11-20): the fence is
+  // structural — mail is read only for the reader's own add-on, saved
+  // only where that reader alone can see it, and never enters the
+  // household's shared briefing. Dates, times, and amounts are quoted
+  // exactly as the mail states them, so the reader can check the
+  // desk's records against them — planning and accuracy both.
+  const MAIL_BRIEF = `
+FROM YOUR MAIL: Write a short personal add-on to this reader's morning briefing from their own recent mail lines below. It will be read aloud, so write plain, warm, spoken sentences.
+- Name what needs the reader: a message asking them for something, a bill, a deadline — sender and subject in plain words.
+- Name what the reader has been waiting on, when a message answers it or shows it is still outstanding.
+- When a message states a date, a time, an amount, or an appointment, give it exactly as written, so the reader can check it against the desk's records.
+- Skip newsletters, advertisements, and automated notices unless they carry a bill or a deadline.
+- Never invent a sender, a subject, a date, or an amount that is not in the lines below.
+Keep it under about 120 words. If nothing in the mail needs the reader, say exactly that in one friendly line.`;
+
   const DESKS: Record<DeskId, Desk> = {
     records: {
       label: 'Records desk',
@@ -1211,24 +1226,40 @@ Answer with the desk id only.`;
   // and the client saves the result — one call per household per day.
   app.post('/api/assistant/briefing', async (req, res) => {
     try {
-      const { context } = req.body as {
+      const { context, kind } = req.body as {
+        kind?: string;
         context?: {
           userName?: string;
           addressName?: string;
           currentDateTime?: string;
           briefingSummary?: string;
+          mailSummary?: string;
         };
       };
       const ctx = context || {};
+      const isMail = kind === 'mail';
       const summary = String(ctx.briefingSummary || '').slice(0, 6000);
-      if (!summary.trim()) {
-        res.status(400).json({ error: 'A summary of the day\'s records is required.' });
+      const mailSummary = String(ctx.mailSummary || '').slice(0, 4000);
+      if (isMail ? !mailSummary.trim() : !summary.trim()) {
+        res.status(400).json({
+          error: isMail
+            ? 'Mail lines are required for a mail add-on.'
+            : 'A summary of the day\'s records is required.',
+        });
         return;
       }
       const ai = getGenAIClient();
       const requestPayload = {
         model: DESK_MODEL,
-        contents: `Current Date/Time: ${ctx.currentDateTime || new Date().toISOString()}
+        contents: isMail
+          ? `Current Date/Time: ${ctx.currentDateTime || new Date().toISOString()}
+Reader: ${ctx.userName || 'Steward User'}${ctx.addressName ? `\nAddress them as: ${ctx.addressName}` : ''}
+
+THE READER'S OWN RECENT MAIL LINES:
+${mailSummary}
+
+Write the mail add-on now, following your brief exactly.`
+          : `Current Date/Time: ${ctx.currentDateTime || new Date().toISOString()}
 Reader: ${ctx.userName || 'Steward User'}${ctx.addressName ? `\nAddress them as: ${ctx.addressName}` : ''}
 
 THE HOUSEHOLD'S RECORDS FOR THE BRIEFING:
@@ -1237,10 +1268,12 @@ ${summary}
 Write the morning briefing now, following your brief exactly.`,
         config: {
           thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-          systemInstruction:
-            'You are Steward, the household desk. You write the morning briefing from the household records you are given, and nothing else.' +
-            PLACE_TREE_BRIEF +
-            BRIEFING_BRIEF,
+          systemInstruction: isMail
+            ? 'You are Steward, the household desk. You write one reader\'s personal mail add-on from the mail lines you are given, and nothing else.' +
+              MAIL_BRIEF
+            : 'You are Steward, the household desk. You write the morning briefing from the household records you are given, and nothing else.' +
+              PLACE_TREE_BRIEF +
+              BRIEFING_BRIEF,
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,

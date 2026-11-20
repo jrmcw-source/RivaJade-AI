@@ -220,6 +220,25 @@ export interface UserProfile {
   // devices (the church case: set it once, it stays set).
   addressName?: string;
   voiceMuted?: boolean;
+  // Email in the morning briefing (Jason, 2026-11-20): each user's own
+  // switch, on their own account — the desk reads that user's Gmail
+  // (read-only) for the briefing only when the switch is on AND the
+  // user has connected mail for the session. Default off; it is a
+  // tested option, not a core principle, until Jason says otherwise.
+  emailEnabled?: boolean;
+  // The mail fence (Jason, 2026-11-20): each user also limits WHICH
+  // mail the desk may use. Kind switches sort mail the way Gmail does —
+  // people who write to you, bills/statements/notices, newsletters and
+  // announcements (off unless allowed). Sender lists are plain text,
+  // one per line: an "only" list narrows the desk to those senders, a
+  // "never" list shuts a sender out entirely and wins over "only".
+  // Absent kind fields mean the defaults: people and bills on,
+  // newsletters off.
+  mailFromPeople?: boolean;
+  mailBills?: boolean;
+  mailNewsletters?: boolean;
+  mailOnlySenders?: string;
+  mailNeverSenders?: string;
   createdAt?: unknown;
   updatedAt?: unknown;
 }
@@ -315,6 +334,20 @@ export interface MorningBriefing {
   userId: string;
   householdId: string;
   memberIds: string[];
+  dateKey: string;
+  text: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+// One reader's personal mail add-on to the morning briefing (Jason,
+// 2026-11-20). The fence is structural: this doc carries no memberIds
+// and its rules are owner-only — nobody else in the household can read
+// it, and its contents never enter the shared briefing.
+export interface MailBriefing {
+  id: string;
+  userId: string;
+  householdId: string;
   dateKey: string;
   text: string;
   createdAt?: unknown;

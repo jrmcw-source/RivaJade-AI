@@ -131,6 +131,12 @@ service cloud.firestore {
           'behaviorSignals',
           'addressName',
           'voiceMuted',
+          'emailEnabled',
+          'mailFromPeople',
+          'mailBills',
+          'mailNewsletters',
+          'mailOnlySenders',
+          'mailNeverSenders',
           'createdAt',
           'updatedAt'
         ])
@@ -140,6 +146,14 @@ service cloud.firestore {
         && (!('addressName' in data)
           || (data.addressName is string && data.addressName.size() <= 80))
         && (!('voiceMuted' in data) || data.voiceMuted is bool)
+        && (!('emailEnabled' in data) || data.emailEnabled is bool)
+        && (!('mailFromPeople' in data) || data.mailFromPeople is bool)
+        && (!('mailBills' in data) || data.mailBills is bool)
+        && (!('mailNewsletters' in data) || data.mailNewsletters is bool)
+        && (!('mailOnlySenders' in data)
+          || (data.mailOnlySenders is string && data.mailOnlySenders.size() <= 500))
+        && (!('mailNeverSenders' in data)
+          || (data.mailNeverSenders is string && data.mailNeverSenders.size() <= 500))
         && data.displayName is string
         && data.displayName.size() <= 120
         && isValidHandle(data.username)
@@ -447,6 +461,36 @@ service cloud.firestore {
         && data.userId is string
         && isValidId(data.userId)
         && isValidHouseholdStamp(data)
+        && data.dateKey is string
+        && data.dateKey.size() == 10
+        && data.text is string
+        && data.text.size() >= 1
+        && data.text.size() <= 4000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMailBriefing(data) {
+      return data.keys().hasAll([
+          'userId',
+          'householdId',
+          'dateKey',
+          'text',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId',
+          'householdId',
+          'dateKey',
+          'text',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.userId is string
+        && isValidId(data.userId)
+        && data.householdId is string
+        && data.householdId.size() <= 128
         && data.dateKey is string
         && data.dateKey.size() == 10
         && data.text is string
@@ -1169,6 +1213,27 @@ service cloud.firestore {
           || isHouseholdMember(existingHouseholdId())
           || (existingHouseholdId().size() > 0
             && householdData(existingHouseholdId()).ownerId == request.auth.uid));
+    }
+
+    match /mailBriefings/{mailBriefingId} {
+      allow get: if isSignedIn() && isValidId(mailBriefingId) && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isVerifiedUser()
+        && isValidId(mailBriefingId)
+        && isValidMailBriefing(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(mailBriefingId)
+        && isValidMailBriefing(incoming())
+        && existing().userId == request.auth.uid
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['text', 'updatedAt']);
+      allow delete: if isVerifiedUser() && isValidId(mailBriefingId)
+        && existing().userId == request.auth.uid;
     }
 
     match /projects/{projectId} {

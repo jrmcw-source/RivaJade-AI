@@ -27,6 +27,7 @@ import {
   Sun,
   X,
   UserCheck,
+  Mail,
   WifiOff,
   Trees,
   Wallet,
@@ -46,7 +47,10 @@ import {
   signOutUser,
   subscribeDriveAccessToken,
   getDriveAccessToken,
+  connectGmail,
+  getGmailAccessToken,
 } from './firebase';
+import { fetchRecentMailSummary } from './gmail';
 import {
   AppNotification,
   CATEGORIES,
@@ -61,6 +65,7 @@ import {
   HouseholdMember,
   JasonNote,
   MorningBriefing,
+  MailBriefing,
   ProjectInvite,
   ProjectMember,
   ProjectTask,
@@ -173,6 +178,18 @@ function withBriefingDefaults(
   };
 }
 
+function withMailBriefingDefaults(
+  rec: Omit<MailBriefing, 'id'>
+): Omit<MailBriefing, 'id'> {
+  return {
+    ...rec,
+    userId: rec.userId || '',
+    householdId: rec.householdId || '',
+    dateKey: rec.dateKey || '',
+    text: rec.text || '',
+  };
+}
+
 function localDateKey(d: Date = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
     d.getDate()
@@ -232,6 +249,7 @@ function MainApp() {
   const [sharedJasonNotes, setSharedJasonNotes] = useState<JasonNote[]>([]);
   const [ownBriefings, setOwnBriefings] = useState<MorningBriefing[]>([]);
   const [sharedBriefings, setSharedBriefings] = useState<MorningBriefing[]>([]);
+  const [ownMailBriefings, setOwnMailBriefings] = useState<MailBriefing[]>([]);
   const [households, setHouseholds] = useState<Household[]>([]);
   const [selectedHouseholdId, setSelectedHouseholdId] = useState<string>('');
   const [selectedPlace, setSelectedPlace] = useState<string>('');
@@ -247,6 +265,11 @@ function MainApp() {
   const [usernameFeedback, setUsernameFeedback] = useState<string | null>(null);
   const [editAddressName, setEditAddressName] = useState('');
   const [addressNameFeedback, setAddressNameFeedback] = useState<string | null>(null);
+  const [gmailConnected, setGmailConnected] = useState(false);
+  const [emailFeedback, setEmailFeedback] = useState<string | null>(null);
+  const [editMailOnly, setEditMailOnly] = useState('');
+  const [editMailNever, setEditMailNever] = useState('');
+  const [mailRulesFeedback, setMailRulesFeedback] = useState<string | null>(null);
 
   type VoiceMemoryState = {
     id: string;
@@ -362,6 +385,8 @@ function MainApp() {
           setUserProfile(data);
           setEditUsername(data.username);
           setEditAddressName(data.addressName || '');
+          setEditMailOnly(data.mailOnlySenders || '');
+          setEditMailNever(data.mailNeverSenders || '');
         }
       },
       (err) => handleFirestoreError(err, OperationType.GET, `users/${user.uid}`)
@@ -479,6 +504,19 @@ function MainApp() {
         );
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'briefings')
+    );
+
+    const unsubMailBriefings = onSnapshot(
+      query(collection(db, 'mailBriefings'), where('userId', '==', user.uid)),
+      (snap) => {
+        setOwnMailBriefings(
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...withMailBriefingDefaults(d.data() as Omit<MailBriefing, 'id'>),
+          }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'mailBriefings')
     );
 
     const unsubProjects = onSnapshot(
@@ -641,6 +679,7 @@ function MainApp() {
       unsubJasonNotesShared();
       unsubBriefings();
       unsubBriefingsShared();
+      unsubMailBriefings();
       unsubProjects();
       unsubInvitesEmail();
       unsubInvitesUid();
@@ -812,6 +851,10 @@ function MainApp() {
   const todaysBriefing = useMemo(
     () => visibleBriefings.find((b) => b.dateKey === localDateKey()) || null,
     [visibleBriefings]
+  );
+  const todaysMailBriefing = useMemo(
+    () => ownMailBriefings.find((b) => b.dateKey === localDateKey()) || null,
+    [ownMailBriefings]
   );
 
   // The place filter: choosing a branch shows that branch and everything
@@ -1270,6 +1313,7 @@ function MainApp() {
         ? sections.join('\n\n')
         : 'Nothing is overdue, nothing is due today or tomorrow, and nothing was finished in the last few days. The desk is clear.';
 
+
       const resp = await fetch('/api/assistant/briefing', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1332,7 +1376,16 @@ function MainApp() {
     }
   }
 
-  async function handleUpdateDeskPrefs(updates: { addressName?: string; voiceMuted?: boolean }) {
+  async function handleUpdateDeskPrefs(updates: {
+    addressName?: string;
+    voiceMuted?: boolean;
+    emailEnabled?: boolean;
+    mailFromPeople?: boolean;
+    mailBills?: boolean;
+    mailNewsletters?: boolean;
+    mailOnlySenders?: string;
+    mailNeverSenders?: string;
+  }) {
     if (!user) return;
     try {
       await updateDoc(doc(db, 'users', user.uid), {
@@ -1341,6 +1394,93 @@ function MainApp() {
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
+    }
+  }
+
+  // Email connect (Jason, 2026-11-20): the reader's own tap grants a
+  // read-only Gmail token for this session. Nothing is stored; when
+  // Google ends the token (about an hour), the briefing simply goes
+  // back to records-only until the reader reconnects here.
+  async function handleConnectGmail() {
+    try {
+      await connectGmail();
+      setGmailConnected(true);
+      setEmailFeedback(
+        todaysBriefing
+          ? 'Email connected. Today’s briefing was already prepared, so mail joins from tomorrow’s.'
+          : 'Email connected. The next morning briefing will include it.'
+      );
+    } catch (err) {
+      console.error('Gmail connect failed', err);
+      setGmailConnected(false);
+      setEmailFeedback('Email did not connect. Please try again.');
+    }
+  }
+
+  // The personal mail add-on (Jason, 2026-11-20): generated once per
+  // reader per day, only when the reader's own toggle is on and mail
+  // is connected, with the reader's own fence applied on this device
+  // before anything reaches the model. It is saved to mailBriefings —
+  // owner-only by rule — and never enters the shared briefing.
+  const mailBriefingInFlightRef = useRef<string>('');
+  async function handleEnsureMailBriefing(): Promise<string | null> {
+    if (!user || !userProfile?.emailEnabled) return null;
+    const dateKey = localDateKey();
+    const existing = ownMailBriefings.find((b) => b.dateKey === dateKey);
+    if (existing) return existing.text;
+    const mailToken = getGmailAccessToken();
+    if (!mailToken) return null;
+    if (mailBriefingInFlightRef.current === dateKey) return null;
+    mailBriefingInFlightRef.current = dateKey;
+    try {
+      const mailSummary = await fetchRecentMailSummary(mailToken, {
+        fromPeople: userProfile.mailFromPeople !== false,
+        billsAndNotices: userProfile.mailBills !== false,
+        newsletters: Boolean(userProfile.mailNewsletters),
+        onlySenders: userProfile.mailOnlySenders || '',
+        neverSenders: userProfile.mailNeverSenders || '',
+      });
+      if (!mailSummary) return null;
+      const resp = await fetch('/api/assistant/briefing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'mail',
+          context: {
+            userName: userProfile.displayName || user.displayName || 'Steward User',
+            addressName: userProfile.addressName || '',
+            currentDateTime: new Date().toLocaleString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+              hour: 'numeric',
+              minute: '2-digit',
+            }),
+            mailSummary,
+          },
+        }),
+      });
+      if (!resp.ok) return null;
+      const data = (await resp.json()) as { briefing?: string };
+      const text = String(data.briefing || '').trim();
+      if (!text) return null;
+      const stamp = householdStamp();
+      const id = `mailbrief-${user.uid.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40)}-${dateKey}`;
+      await setDoc(doc(db, 'mailBriefings', id), {
+        userId: user.uid,
+        householdId: stamp.householdId,
+        dateKey,
+        text: text.slice(0, 4000),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      return text;
+    } catch (err) {
+      console.error('Mail briefing failed', err);
+      return null;
+    } finally {
+      mailBriefingInFlightRef.current = '';
     }
   }
 
@@ -2752,6 +2892,24 @@ function MainApp() {
             </div>
           )}
 
+          {todaysMailBriefing && (
+            <div className="mb-6 bg-white dark:bg-slate-900 border border-violet-300 dark:border-violet-800 rounded-xl p-5 space-y-3">
+              <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                From your mail — only you see this
+              </h2>
+              <div className="space-y-2">
+                {todaysMailBriefing.text.split(/\n\s*\n/).map((para, i) => (
+                  <p
+                    key={i}
+                    className="text-sm leading-relaxed text-slate-700 dark:text-slate-200"
+                  >
+                    {para}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+
           {visibleJasonNotes.length > 0 && (
             <div className="mb-6 bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-800 rounded-xl p-5 space-y-3">
               <div className="flex items-center justify-between gap-3">
@@ -3042,6 +3200,118 @@ function MainApp() {
                   until it is turned back on here or on the front door itself.
                 </span>
               </label>
+              <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400 pt-1">
+                <input
+                  type="checkbox"
+                  checked={Boolean(userProfile?.emailEnabled)}
+                  onChange={(e) =>
+                    void handleUpdateDeskPrefs({ emailEnabled: e.target.checked })
+                  }
+                  className="mt-0.5"
+                />
+                <span>
+                  Include my email in the morning briefing. Steward reads my Gmail —
+                  read-only, it never sends — and the briefing names what needs me and
+                  what I am waiting on. This switch is mine alone: it covers only my
+                  account, on my word.
+                </span>
+              </label>
+              {userProfile?.emailEnabled && (
+                <div className="pt-1 space-y-1.5">
+                  <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400">
+                    <input
+                      type="checkbox"
+                      checked={userProfile?.mailFromPeople !== false}
+                      onChange={(e) =>
+                        void handleUpdateDeskPrefs({ mailFromPeople: e.target.checked })
+                      }
+                      className="mt-0.5"
+                    />
+                    <span>People who write to me</span>
+                  </label>
+                  <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400">
+                    <input
+                      type="checkbox"
+                      checked={userProfile?.mailBills !== false}
+                      onChange={(e) =>
+                        void handleUpdateDeskPrefs({ mailBills: e.target.checked })
+                      }
+                      className="mt-0.5"
+                    />
+                    <span>Bills, statements, and notices</span>
+                  </label>
+                  <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(userProfile?.mailNewsletters)}
+                      onChange={(e) =>
+                        void handleUpdateDeskPrefs({ mailNewsletters: e.target.checked })
+                      }
+                      className="mt-0.5"
+                    />
+                    <span>Newsletters and announcements</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => void handleConnectGmail()}
+                    className="min-h-[42px] inline-flex items-center gap-1.5 px-3.5 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-lg"
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>{gmailConnected ? 'Reconnect my email' : 'Connect my email'}</span>
+                  </button>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {gmailConnected
+                      ? 'Connected for this session. Google ends the connection after about an hour; reconnect here when the briefing stops including mail.'
+                      : 'Not connected right now. Connecting lasts about an hour at a time, on Google’s rules.'}
+                  </p>
+                  {emailFeedback && (
+                    <p className="text-xs text-teal-700 dark:text-teal-400">{emailFeedback}</p>
+                  )}
+                </div>
+              )}
+              {userProfile?.emailEnabled && (
+                <div className="space-y-2 pt-1">
+                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                    Only use mail from these senders (one per line — leave empty to allow
+                    everyone the switches above let through)
+                  </label>
+                  <textarea
+                    value={editMailOnly}
+                    onChange={(e) => setEditMailOnly(e.target.value)}
+                    rows={2}
+                    placeholder={'bank@example.com\nsister@example.com'}
+                    className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                  />
+                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                    Never use mail from these senders (one per line — this wins over the
+                    list above)
+                  </label>
+                  <textarea
+                    value={editMailNever}
+                    onChange={(e) => setEditMailNever(e.target.value)}
+                    rows={2}
+                    className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void handleUpdateDeskPrefs({
+                        mailOnlySenders: editMailOnly.trim().slice(0, 500),
+                        mailNeverSenders: editMailNever.trim().slice(0, 500),
+                      }).then(() => {
+                        setMailRulesFeedback('Saved.');
+                        window.setTimeout(() => setMailRulesFeedback(null), 2500);
+                      })
+                    }
+                    className="min-h-[42px] inline-flex items-center gap-1.5 px-3.5 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-lg"
+                  >
+                    <span>Save mail rules</span>
+                  </button>
+                  {mailRulesFeedback && (
+                    <p className="text-xs text-teal-700 dark:text-teal-400">{mailRulesFeedback}</p>
+                  )}
+                </div>
+              )}
             </form>
 
             <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
@@ -3384,6 +3654,8 @@ function MainApp() {
           onShowCalendar={handleShowCalendar}
           briefingText={todaysBriefing?.text || null}
           onRequestBriefing={handleEnsureBriefing}
+          mailBriefingText={todaysMailBriefing?.text || null}
+          onRequestMailBriefing={handleEnsureMailBriefing}
           onSaveMemory={handleSaveVoiceMemory}
           onRecordBehaviorSignal={handleRecordBehaviorSignal}
         />
