@@ -967,6 +967,141 @@ Generate a focused seasonal stewardship and rental cabin action plan with 4-6 sp
   // ---------------------------------------------------------------------------
   // 3d. Cross-App AI Assistant Endpoint
   // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // Supervisor & desks (Jason's ruling, 2026-11-19)
+  //
+  // A small routing call reads the user's latest message and picks a desk.
+  // The desk's call then carries ONLY that desk's slices of the workspace
+  // snapshot and may offer ONLY that desk's actions — the lanes and the
+  // savings come from what each call is given, not from asking the model to
+  // behave. If routing fails for any reason, the request falls back to the
+  // general desk, which is exactly the pre-supervisor behavior: every slice,
+  // every action. The voice path and the document scan are unchanged.
+  //
+  // Model sizes are settings, not structure: SUPERVISOR_MODEL routes,
+  // DESK_MODEL does the desks' work. Both default to the model this app
+  // already runs on; change them here, in one place, when the household's
+  // API tier makes a different trade the right one.
+  // -------------------------------------------------------------------------
+  const SUPERVISOR_MODEL = 'gemini-4-hydrogen';
+  const DESK_MODEL = 'gemini-4-hydrogen';
+
+  const SUPERVISOR_RULES = `
+
+SUPERVISOR RULES — these bind every desk, whatever the user asks:
+- Nothing is ever deleted. If the user asks to remove something, explain that the desk keeps everything, and offer to mark or correct it instead.
+- The family's standing rule for its records: never offer more information than what is legally obligated. The most recent 3 years of any place are freely shown to the household. For anything older, or for any summary meant for someone outside the household, ask who it is for and which agency or purpose needs it before providing it.
+- Stay in your desk's lane. If part of a request belongs to another desk, say which desk it belongs to, answer only your part, and let the user ask that desk.`;
+
+  type DeskId = 'records' | 'appointments' | 'finance' | 'general';
+  type DeskSlice = 'tasks' | 'wimberley' | 'finances' | 'documents';
+  type DeskAction =
+    | 'create_task'
+    | 'log_expense'
+    | 'create_property_entry'
+    | 'open_drive_backup'
+    | 'navigate';
+  interface Desk {
+    label: string;
+    slices: DeskSlice[];
+    actions: DeskAction[];
+    brief: string;
+  }
+
+  const DESKS: Record<DeskId, Desk> = {
+    records: {
+      label: 'Records desk',
+      slices: ['documents', 'wimberley'],
+      actions: ['create_property_entry', 'open_drive_backup', 'navigate'],
+      brief: `
+
+YOUR DESK: Records. You handle the document vault and the property record: finding papers, saying where a paper is, what a document says, property entries and history, and Drive backups. You do not schedule appointments or record spending; those belong to the Appointments and Finance desks.`,
+    },
+    appointments: {
+      label: 'Appointments desk',
+      slices: ['tasks'],
+      actions: ['create_task', 'navigate'],
+      brief: `
+
+YOUR DESK: Appointments. You handle the schedule: tasks, appointments, due dates, reminders, and what is coming up. You do not search the document vault or record spending; those belong to the Records and Finance desks.`,
+    },
+    finance: {
+      label: 'Finance desk',
+      slices: ['finances'],
+      actions: ['log_expense', 'navigate'],
+      brief: `
+
+YOUR DESK: Finance. You handle money records: logging expenses and income, totals and groupings, and the per-agency record windows in the place brief. You do not schedule appointments or search the document vault; those belong to the Appointments and Records desks.`,
+    },
+    general: {
+      label: 'General desk',
+      slices: ['tasks', 'wimberley', 'finances', 'documents'],
+      actions: [
+        'create_task',
+        'log_expense',
+        'create_property_entry',
+        'open_drive_backup',
+        'navigate',
+      ],
+      brief: `
+
+YOUR DESK: General. This request spans more than one desk or does not fit one, so you have the whole workspace and every action. Handle it whole.`,
+    },
+  };
+
+  const DESK_ROUTER_BRIEF = `You route one household message to exactly one desk.
+- "records": finding or reading papers and documents, where a paper is, property entries and property history, backups.
+- "appointments": scheduling, tasks, appointments, due dates, reminders, what is coming up.
+- "finance": money — spending, income, totals, bills, record windows for an agency.
+- "general": anything mixed, unclear, or outside the other three.
+Answer with the desk id only.`;
+
+  async function routeDesk(
+    ai: ReturnType<typeof getGenAIClient>,
+    lastUserText: string
+  ): Promise<DeskId> {
+    try {
+      const response = await ai.models.generateContent({
+        model: SUPERVISOR_MODEL,
+        contents: `Latest message from the user:\n${lastUserText.slice(0, 1000)}`,
+        config: {
+          systemInstruction: DESK_ROUTER_BRIEF,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              desk: {
+                type: Type.STRING,
+                enum: ['records', 'appointments', 'finance', 'general'],
+              },
+            },
+            required: ['desk'],
+          },
+        },
+      });
+      const parsed = JSON.parse((response.text ?? '{}').trim()) as { desk?: string };
+      if (parsed.desk && parsed.desk in DESKS) {
+        return parsed.desk as DeskId;
+      }
+    } catch (err) {
+      console.error('Supervisor routing failed; using the general desk:', err);
+    }
+    return 'general';
+  }
+
+  function actionDocLines(actions: DeskAction[]): string {
+    const docs: Record<DeskAction, string> = {
+      create_task: `- "create_task": {"title":string,"category":one of ${JSON.stringify(CATEGORIES)},"place":"Riva Jade"|"Riva Jade — Homestead"|"Riva Jade — Rental Cabin"|"Riva Jade — Wildlife Conservancy"|"Oakleaf"|"Elephant Walk"|"","type":"task"|"appointment","dueDate":"YYYY-MM-DD","dueTime":"HH:MM" or "","priority":"low"|"medium"|"high","estimatedMinutes":number,"notes":string}`,
+      log_expense: `- "log_expense": {"title":string,"amount":number,"group":"Conservancy"|"Home Repairs"|"Rental Upkeep"|"Groceries"|"Medical - Mom"|"Medical - Jason"|"Utilities & Propane"|"Taxes & Insurance"|"Car & Maintenance"|"Church & Community"|"Rental Income"|"General","kind":"expense"|"income","vendor":string,"entryDate":"YYYY-MM-DD","place":"Riva Jade"|"Riva Jade — Homestead"|"Riva Jade — Rental Cabin"|"Riva Jade — Wildlife Conservancy"|"Oakleaf"|"Elephant Walk"|"","careForJason":boolean,"taxDeductible":boolean,"notes":string}`,
+      create_property_entry: `- "create_property_entry": {"title":string,"place":"Riva Jade"|"Riva Jade — Homestead"|"Riva Jade — Rental Cabin"|"Riva Jade — Wildlife Conservancy"|"Oakleaf"|"Elephant Walk"|"","area":"conservancy"|"cabin_maintenance"|"cabin_stay","status":"nominal"|"attention"|"urgent"|"upcoming"|"ready"|"completed","scheduledDate":"YYYY-MM-DD","cadence":"once"|"monthly"|"quarterly"|"seasonal"|"annual","inspectorOrGuest":string,"notes":string}`,
+      open_drive_backup: `- "open_drive_backup": {"reason":string}`,
+      navigate: `- "navigate": {"tab":"schedule"|"property"|"finances"|"vault"|"projects"|"voice"|"analytics"}`,
+    };
+    return actions.map((a) => docs[a]).join('\n          ');
+  }
+
+
   app.post('/api/assistant/chat', async (req, res) => {
     try {
       const { messages, context } = req.body as {
@@ -994,40 +1129,58 @@ Generate a focused seasonal stewardship and rental cabin action plan with 4-6 sp
 
       const ctx = context || {};
       const ai = getGenAIClient();
+
+      // Supervisor: route this message to a desk. The desk decides what
+      // this call sees and which actions it may offer. Any routing
+      // failure lands on the general desk — the pre-supervisor behavior.
+      const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user');
+      const deskId = await routeDesk(ai, lastUserMessage?.text || '');
+      const desk = DESKS[deskId];
+      const sumTasks = desk.slices.includes('tasks')
+        ? ctx.tasksSummary || 'No tasks recorded yet.'
+        : 'Not shown to this desk.';
+      const sumWimberley = desk.slices.includes('wimberley')
+        ? ctx.wimberleySummary || 'No property entries recorded yet.'
+        : 'Not shown to this desk.';
+      const sumFinances = desk.slices.includes('finances')
+        ? ctx.financesSummary || 'No financial entries recorded yet.'
+        : 'Not shown to this desk.';
+      const sumDocuments = desk.slices.includes('documents')
+        ? ctx.documentsSummary || 'No scanned documents yet.'
+        : 'Not shown to this desk.';
+      const actionDocs = actionDocLines(desk.actions);
       const requestPayload = {
-        model: 'gemini-4-hydrogen',
+        model: DESK_MODEL,
         contents: `Current Date/Time: ${ctx.currentDateTime || new Date().toISOString()}
 User: ${ctx.userName || 'Steward User'}
 Google Drive Backup Status: ${ctx.driveConnected ? 'Connected in current session' : 'Not yet connected in this session (user can connect via Google Drive Backups)'}
 
 LIVE WORKSPACE SNAPSHOT:
 1) Schedule & Tasks:
-${ctx.tasksSummary || 'No tasks recorded yet.'}
+${sumTasks}
 
 2) Wimberley, TX Family Property (Conservancy & Rental Cabin):
-${ctx.wimberleySummary || 'No property entries recorded yet.'}
+${sumWimberley}
 
 3) Finances & Expenditure Groupings:
-${ctx.financesSummary || 'No financial entries recorded yet.'}
+${sumFinances}
 
 4) OCR Document Vault:
-${ctx.documentsSummary || 'No scanned documents yet.'}
+${sumDocuments}
 
 CONVERSATION:
 ${recentHistory}
 
 Respond to the user's latest message directly using their real workspace data above. When helpful, propose 0 to 3 ready-to-apply suggestedActions that the user can trigger with one click.
 For each action in suggestedActions, set payloadJson to a valid JSON string matching its type:
-- "create_task": {"title":string,"category":one of ${JSON.stringify(CATEGORIES)},"place":"Riva Jade"|"Riva Jade — Homestead"|"Riva Jade — Rental Cabin"|"Riva Jade — Wildlife Conservancy"|"Oakleaf"|"Elephant Walk"|"","type":"task"|"appointment","dueDate":"YYYY-MM-DD","dueTime":"HH:MM" or "","priority":"low"|"medium"|"high","estimatedMinutes":number,"notes":string}
-- "log_expense": {"title":string,"amount":number,"group":"Conservancy"|"Home Repairs"|"Rental Upkeep"|"Groceries"|"Medical - Mom"|"Medical - Jason"|"Utilities & Propane"|"Taxes & Insurance"|"Car & Maintenance"|"Church & Community"|"Rental Income"|"General","kind":"expense"|"income","vendor":string,"entryDate":"YYYY-MM-DD","place":"Riva Jade"|"Riva Jade — Homestead"|"Riva Jade — Rental Cabin"|"Riva Jade — Wildlife Conservancy"|"Oakleaf"|"Elephant Walk"|"","careForJason":boolean,"taxDeductible":boolean,"notes":string}
-- "create_property_entry": {"title":string,"place":"Riva Jade"|"Riva Jade — Homestead"|"Riva Jade — Rental Cabin"|"Riva Jade — Wildlife Conservancy"|"Oakleaf"|"Elephant Walk"|"","area":"conservancy"|"cabin_maintenance"|"cabin_stay","status":"nominal"|"attention"|"urgent"|"upcoming"|"ready"|"completed","scheduledDate":"YYYY-MM-DD","cadence":"once"|"monthly"|"quarterly"|"seasonal"|"annual","inspectorOrGuest":string,"notes":string}
-- "open_drive_backup": {"reason":string}
-- "navigate": {"tab":"schedule"|"property"|"finances"|"vault"|"projects"|"voice"|"analytics"}`,
+${actionDocs}`,
         config: {
           thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           systemInstruction:
             'You are Steward AI Assistant, a knowledgeable, concise, practical household, Texas Hill Country property, and personal finance assistant. Ground every answer in the user workspace data provided. Never invent fake totals or documents. Use plain, helpful prose and only include suggestedActions when genuinely actionable.' +
-            PLACE_TREE_BRIEF,
+            PLACE_TREE_BRIEF +
+            SUPERVISOR_RULES +
+            desk.brief,
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
@@ -1040,13 +1193,7 @@ For each action in suggestedActions, set payloadJson to a valid JSON string matc
                   properties: {
                     type: {
                       type: Type.STRING,
-                      enum: [
-                        'create_task',
-                        'log_expense',
-                        'create_property_entry',
-                        'open_drive_backup',
-                        'navigate',
-                      ],
+                      enum: [...desk.actions],
                     },
                     label: { type: Type.STRING },
                     payloadJson: { type: Type.STRING },
@@ -1085,8 +1232,11 @@ For each action in suggestedActions, set payloadJson to a valid JSON string matc
       res.json({
         reply: parsed.reply || 'I reviewed your workspace. How would you like to proceed?',
         suggestedActions: Array.isArray(parsed.suggestedActions)
-          ? parsed.suggestedActions.slice(0, 4)
+          ? parsed.suggestedActions
+              .filter((a) => desk.actions.includes(a.type))
+              .slice(0, 4)
           : [],
+        desk: deskId,
       });
     } catch (error) {
       console.error('AI Assistant chat error:', error);
