@@ -1302,6 +1302,7 @@ service cloud.firestore {
           'familyId',
           'circleIds',
           'displayName',
+          'birthday', 'anniversary', 'anniversaryLabel',
           'physicalAddress',
           'billingAddress',
           'phones',
@@ -1324,6 +1325,9 @@ service cloud.firestore {
         && (!('phones' in data) || isBoundedStringList(data.phones, 6, 120))
         && (!('emails' in data) || isBoundedStringList(data.emails, 6, 160))
         && (!('notes' in data) || (data.notes is string && data.notes.size() <= 500))
+        && (!('birthday' in data) || (data.birthday is string && data.birthday.size() <= 10))
+        && (!('anniversary' in data) || (data.anniversary is string && data.anniversary.size() <= 10))
+        && (!('anniversaryLabel' in data) || (data.anniversaryLabel is string && data.anniversaryLabel.size() <= 80))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }

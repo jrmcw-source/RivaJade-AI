@@ -766,6 +766,13 @@ export interface DirectoryEntry {
   familyId?: string;
   circleIds?: string[];
   displayName: string;
+  // Occasions (Jason, 2026-11-21): birthdays and anniversaries
+  // ride on the directory entry, so planning can surface them.
+  // Written as YYYY-MM-DD when the year is known, MM-DD when it
+  // is not.
+  birthday?: string;
+  anniversary?: string;
+  anniversaryLabel?: string;
   physicalAddress?: string;
   billingAddress?: string;
   phones?: string[];
@@ -783,6 +790,54 @@ export interface DirectoryEntry {
 // the credentials box (credentialId). The box is a separate store
 // with its own rules — the way Jason's own passwords work with
 // Moose: apart from the records, reached only through the box.
+
+export interface Occasion {
+  name: string;
+  label: string;
+  dateKey: string;
+  daysAway: number;
+  turningYears?: number;
+}
+
+// The next birthdays and anniversaries among the directory
+// entries a reader may see, soonest first.
+export function upcomingOccasions(entries: DirectoryEntry[], withinDays = 60): Occasion[] {
+  const out: Occasion[] = [];
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const consider = (entry: DirectoryEntry, raw: string | undefined, kind: 'birthday' | 'anniversary') => {
+    if (!raw) return;
+    const m = /^(?:(\d{4})-)?(\d{2})-(\d{2})$/.exec(raw.trim());
+    if (!m) return;
+    const year = m[1] ? parseInt(m[1], 10) : undefined;
+    const month = parseInt(m[2], 10) - 1;
+    const day = parseInt(m[3], 10);
+    let next = new Date(today.getFullYear(), month, day);
+    if (next.getTime() < today.getTime()) {
+      next = new Date(today.getFullYear() + 1, month, day);
+    }
+    const daysAway = Math.round((next.getTime() - today.getTime()) / 86400000);
+    if (daysAway > withinDays) return;
+    const label =
+      kind === 'birthday'
+        ? 'Birthday'
+        : entry.anniversaryLabel?.trim() || 'Anniversary';
+    out.push({
+      name: entry.displayName,
+      label,
+      dateKey: `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`,
+      daysAway,
+      turningYears: year ? next.getFullYear() - year : undefined,
+    });
+  };
+  for (const entry of entries) {
+    consider(entry, entry.birthday, 'birthday');
+    consider(entry, entry.anniversary, 'anniversary');
+  }
+  out.sort((a, b) => a.daysAway - b.daysAway);
+  return out;
+}
+
 export interface AccountRecord {
   id: string;
   userId: string;

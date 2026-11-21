@@ -71,6 +71,7 @@ import {
   RecordKind,
   CircleBriefing,
   circleHeadIds,
+  upcomingOccasions,
   computeStreamLists,
   effectiveRecordKind,
   effectiveSealedKinds,
@@ -364,6 +365,9 @@ function MainApp() {
   const [ownDirectoryEntries, setOwnDirectoryEntries] = useState<DirectoryEntry[]>([]);
   const [sharedDirectoryEntries, setSharedDirectoryEntries] = useState<DirectoryEntry[]>([]);
   const [dirName, setDirName] = useState('');
+  const [dirBirthday, setDirBirthday] = useState('');
+  const [dirAnniversary, setDirAnniversary] = useState('');
+  const [dirAnniversaryLabel, setDirAnniversaryLabel] = useState('');
   const [dirPhysical, setDirPhysical] = useState('');
   const [dirBilling, setDirBilling] = useState('');
   const [dirPhonesText, setDirPhonesText] = useState('');
@@ -2774,6 +2778,9 @@ function MainApp() {
   function handleEditDirectoryEntry(entry: DirectoryEntry) {
     setDirEditingId(entry.id);
     setDirName(entry.displayName || '');
+    setDirBirthday(entry.birthday || '');
+    setDirAnniversary(entry.anniversary || '');
+    setDirAnniversaryLabel(entry.anniversaryLabel || '');
     setDirPhysical(entry.physicalAddress || '');
     setDirBilling(entry.billingAddress || '');
     setDirPhonesText((entry.phones || []).join('\n'));
@@ -2796,6 +2803,9 @@ function MainApp() {
     const memberIds = audienceFor(dirScope, dirFamilyId, [], activeHousehold?.householdId || '', 'documents');
     const payload: Record<string, unknown> = {
       displayName,
+      birthday: dirBirthday.trim(),
+      anniversary: dirAnniversary.trim(),
+      anniversaryLabel: dirAnniversaryLabel.trim(),
       physicalAddress: dirPhysical.trim(),
       billingAddress: dirBilling.trim(),
       phones,
@@ -5804,6 +5814,7 @@ function MainApp() {
 
           {(activeTab === 'schedule' || activeTab === 'frontdoor') && (
             <ScheduleAndCalendarView
+              occasions={upcomingOccasions(directoryEntries)}
               userProfile={userProfile}
               tasks={displayTasks}
               allTasks={visibleTasks}
@@ -6917,6 +6928,29 @@ function MainApp() {
                   placeholder="Name the family knows you by"
                   className="w-full min-h-[38px] px-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
                 />
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <input
+                    type="text"
+                    value={dirBirthday}
+                    onChange={(e) => setDirBirthday(e.target.value)}
+                    placeholder="Birthday — 1985-06-14, or 06-14"
+                    className="w-full min-h-[38px] px-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                  />
+                  <input
+                    type="text"
+                    value={dirAnniversary}
+                    onChange={(e) => setDirAnniversary(e.target.value)}
+                    placeholder="Anniversary — 2010-09-03, or 09-03"
+                    className="w-full min-h-[38px] px-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                  />
+                  <input
+                    type="text"
+                    value={dirAnniversaryLabel}
+                    onChange={(e) => setDirAnniversaryLabel(e.target.value)}
+                    placeholder="What the anniversary marks — Wedding"
+                    className="w-full min-h-[38px] px-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                  />
+                </div>
                 <textarea
                   value={dirPhysical}
                   onChange={(e) => setDirPhysical(e.target.value)}
@@ -7151,7 +7185,9 @@ function MainApp() {
                 protection, the sharing, and the backup at once, and there is one place
                 to guard. The files are held in the vault and the tags do the work, so a
                 record moving between private, household, and family never needs its
-                file to move at all. A different root is allowed, with open eyes: what
+                file to move at all. And the head's word stands inside her tier: if you
+                disagree with your head, the answer is the door — leave the app, or the
+                family. Your own records leave with you. A different root is allowed, with open eyes: what
                 sits outside the root sits outside the desk's backup and protection, and
                 anyone you share the folder with can see what is in it.
               </p>
