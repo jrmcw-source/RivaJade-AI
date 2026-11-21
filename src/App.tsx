@@ -10,6 +10,7 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  addDoc,
   updateDoc,
   where,
   writeBatch,
@@ -66,6 +67,8 @@ import {
   JasonNote,
   MorningBriefing,
   MailBriefing,
+  Family,
+  Circle,
   ProjectInvite,
   ProjectMember,
   ProjectTask,
@@ -190,6 +193,27 @@ function withMailBriefingDefaults(
   };
 }
 
+function withFamilyDefaults(rec: Omit<Family, 'id'>): Omit<Family, 'id'> {
+  return {
+    ...rec,
+    name: rec.name || 'Family',
+    ownerId: rec.ownerId || '',
+    ownerName: rec.ownerName || '',
+    memberIds: rec.memberIds || [],
+  };
+}
+
+function withCircleDefaults(rec: Omit<Circle, 'id'>): Omit<Circle, 'id'> {
+  return {
+    ...rec,
+    name: rec.name || 'Circle',
+    ownerId: rec.ownerId || '',
+    memberIds: rec.memberIds || [],
+    temporary: Boolean(rec.temporary),
+    expiresAtKey: rec.expiresAtKey || '',
+  };
+}
+
 function localDateKey(d: Date = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
     d.getDate()
@@ -250,6 +274,8 @@ function MainApp() {
   const [ownBriefings, setOwnBriefings] = useState<MorningBriefing[]>([]);
   const [sharedBriefings, setSharedBriefings] = useState<MorningBriefing[]>([]);
   const [ownMailBriefings, setOwnMailBriefings] = useState<MailBriefing[]>([]);
+  const [families, setFamilies] = useState<Family[]>([]);
+  const [circles, setCircles] = useState<Circle[]>([]);
   const [households, setHouseholds] = useState<Household[]>([]);
   const [selectedHouseholdId, setSelectedHouseholdId] = useState<string>('');
   const [selectedPlace, setSelectedPlace] = useState<string>('');
@@ -366,6 +392,8 @@ function MainApp() {
         setOwnFinanceEntries([]);
         setSharedFinanceEntries([]);
         setHouseholds([]);
+        setFamilies([]);
+        setCircles([]);
         setJoinableHouseholds([]);
         setHouseholdMembers([]);
       }
@@ -517,6 +545,32 @@ function MainApp() {
         );
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'mailBriefings')
+    );
+
+    const unsubFamilies = onSnapshot(
+      query(collection(db, 'families'), where('memberIds', 'array-contains', user.uid)),
+      (snap) => {
+        setFamilies(
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...withFamilyDefaults(d.data() as Omit<Family, 'id'>),
+          }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'families')
+    );
+
+    const unsubCircles = onSnapshot(
+      query(collection(db, 'circles'), where('memberIds', 'array-contains', user.uid)),
+      (snap) => {
+        setCircles(
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...withCircleDefaults(d.data() as Omit<Circle, 'id'>),
+          }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'circles')
     );
 
     const unsubProjects = onSnapshot(
@@ -680,6 +734,8 @@ function MainApp() {
       unsubBriefings();
       unsubBriefingsShared();
       unsubMailBriefings();
+      unsubFamilies();
+      unsubCircles();
       unsubProjects();
       unsubInvitesEmail();
       unsubInvitesUid();
@@ -819,27 +875,27 @@ function MainApp() {
     hid === activeHousehold.householdId ||
     !households.some((h) => h.householdId === hid);
   const visibleTasks = useMemo(
-    () => tasks.filter((t) => householdInScope(t.householdId)),
+    () => tasks.filter((t) => householdInScope(t.householdId) || (t.scope && t.scope !== 'household')),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [tasks, activeHousehold, households]
   );
   const visibleDocuments = useMemo(
-    () => documents.filter((d) => householdInScope(d.householdId)),
+    () => documents.filter((d) => householdInScope(d.householdId) || (d.scope && d.scope !== 'household')),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [documents, activeHousehold, households]
   );
   const visiblePropertyEntries = useMemo(
-    () => propertyEntries.filter((p) => householdInScope(p.householdId)),
+    () => propertyEntries.filter((p) => householdInScope(p.householdId) || (p.scope && p.scope !== 'household')),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [propertyEntries, activeHousehold, households]
   );
   const visibleFinanceEntries = useMemo(
-    () => financeEntries.filter((f) => householdInScope(f.householdId)),
+    () => financeEntries.filter((f) => householdInScope(f.householdId) || (f.scope && f.scope !== 'household')),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [financeEntries, activeHousehold, households]
   );
   const visibleJasonNotes = useMemo(
-    () => jasonNotes.filter((n) => householdInScope(n.householdId)),
+    () => jasonNotes.filter((n) => householdInScope(n.householdId) || (n.scope && n.scope !== 'household')),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [jasonNotes, activeHousehold, households]
   );
@@ -856,6 +912,26 @@ function MainApp() {
     () => ownMailBriefings.find((b) => b.dateKey === localDateKey()) || null,
     [ownMailBriefings]
   );
+  const activeFamily = useMemo(
+    () =>
+      activeHousehold?.familyId
+        ? families.find((f) => f.id === activeHousehold.familyId) || null
+        : null,
+    [families, activeHousehold]
+  );
+  const visibilityOptions = useMemo(() => {
+    const opts: Array<{ value: string; label: string }> = [
+      { value: 'household', label: 'Household' },
+      { value: 'private', label: 'Just me' },
+    ];
+    if (activeFamily) {
+      opts.push({ value: `family:${activeFamily.id}`, label: `Family — ${activeFamily.name}` });
+    }
+    circles
+      .filter((c) => !c.temporary || !c.expiresAtKey || c.expiresAtKey >= localDateKey())
+      .forEach((c) => opts.push({ value: `circle:${c.id}`, label: `Circle — ${c.name}` }));
+    return opts;
+  }, [activeFamily, circles]);
 
   // The place filter: choosing a branch shows that branch and everything
   // under it; '' is Mom's whole desk, the master copy. Backup, restore,
@@ -1032,12 +1108,47 @@ function MainApp() {
   ) {
     if (!user) return;
     const id = createSafeId('task');
-    const stamp = householdStamp();
+    let stamp = householdStamp();
+    let scopeFields: Record<string, unknown> = {};
+    // Visibility (Jason, 2026-11-20): the composer can aim a task at a
+    // ring or a circle; the audience snapshot is computed here, and
+    // the depositor (userId) is always in it and always the owner.
+    if (payload.scope === 'private') {
+      stamp = {
+        householdId: activeHousehold?.householdId || '',
+        memberIds: [user.uid],
+      };
+      scopeFields = { scope: 'private', familyId: '', circleIds: [] };
+    } else if (payload.scope === 'family' && (payload.familyId || activeFamily)) {
+      const fam =
+        families.find((f) => f.id === (payload.familyId || '')) || activeFamily;
+      if (fam) {
+        stamp = {
+          householdId: activeHousehold?.householdId || '',
+          memberIds: fam.memberIds.slice(0, 100),
+        };
+        scopeFields = { scope: 'family', familyId: fam.id, circleIds: [] };
+      }
+    } else if (payload.scope === 'circles' && payload.circleIds?.length) {
+      const ids = payload.circleIds.slice(0, 4);
+      const audience = new Set<string>([user.uid]);
+      ids.forEach((cid) =>
+        circles
+          .find((c) => c.id === cid)
+          ?.memberIds.forEach((m) => audience.add(m))
+      );
+      stamp = {
+        householdId: activeHousehold?.householdId || '',
+        memberIds: [...audience].slice(0, 100),
+      };
+      scopeFields = { scope: 'circles', familyId: '', circleIds: ids };
+    }
     try {
       await setDoc(doc(db, 'tasks', id), {
         userId: user.uid,
         householdId: stamp.householdId,
         memberIds: stamp.memberIds,
+        ...scopeFields,
         title: payload.title.slice(0, 200),
         type: payload.type,
         category: payload.category,
@@ -1394,6 +1505,93 @@ function MainApp() {
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
+    }
+  }
+
+  // The family and the circles (Jason, 2026-11-20): the widest ring
+  // and the hand-drawn ones. Creating a family makes the creator its
+  // owner; linking a household (owner to owner) folds the household's
+  // members into the family roster. A circle is drawn from the active
+  // household's people; its creator owns it and can end it.
+  const [familyNameDraft, setFamilyNameDraft] = useState('');
+  const [familyFeedback, setFamilyFeedback] = useState<string | null>(null);
+  const [circleNameDraft, setCircleNameDraft] = useState('');
+  const [circleTemporary, setCircleTemporary] = useState(false);
+  const [circleExpiry, setCircleExpiry] = useState('');
+  const [circlePicks, setCirclePicks] = useState<string[]>([]);
+  const [circleFeedback, setCircleFeedback] = useState<string | null>(null);
+
+  async function handleCreateFamily(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user || !userProfile) return;
+    const name = familyNameDraft.trim().slice(0, 120);
+    if (!name) return;
+    try {
+      await addDoc(collection(db, 'families'), {
+        name,
+        ownerId: user.uid,
+        ownerName: userProfile.displayName || user.displayName || 'Steward User',
+        memberIds: [user.uid],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setFamilyNameDraft('');
+      setFamilyFeedback('Family created. Link a household to it below.');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'families');
+    }
+  }
+
+  async function handleLinkHouseholdToFamily(family: Family) {
+    if (!user || !activeHousehold) return;
+    try {
+      const merged = [...new Set([...family.memberIds, ...activeHousehold.memberIds])].slice(0, 100);
+      await updateDoc(doc(db, 'families', family.id), {
+        memberIds: merged,
+        updatedAt: serverTimestamp(),
+      });
+      await updateDoc(doc(db, 'households', activeHousehold.householdId), {
+        familyId: family.id,
+        updatedAt: serverTimestamp(),
+      });
+      setFamilyFeedback(`"${activeHousehold.name}" is linked to ${family.name}.`);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, 'families/households');
+    }
+  }
+
+  async function handleCreateCircle(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user) return;
+    const name = circleNameDraft.trim().slice(0, 80);
+    if (!name) return;
+    const memberIds = [...new Set([user.uid, ...circlePicks])].slice(0, 50);
+    try {
+      await addDoc(collection(db, 'circles'), {
+        name,
+        ownerId: user.uid,
+        memberIds,
+        temporary: circleTemporary,
+        ...(circleTemporary && circleExpiry ? { expiresAtKey: circleExpiry } : {}),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setCircleNameDraft('');
+      setCirclePicks([]);
+      setCircleTemporary(false);
+      setCircleExpiry('');
+      setCircleFeedback(`Circle "${name}" drawn. Only its members can see it, or anything tagged to it.`);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'circles');
+    }
+  }
+
+  async function handleDeleteCircle(circle: Circle) {
+    try {
+      await deleteDoc(doc(db, 'circles', circle.id));
+      setCircleFeedback(`Circle "${circle.name}" ended. Records tagged to it keep their other tags and their owner.`);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `circles/${circle.id}`);
     }
   }
 
@@ -2987,6 +3185,7 @@ function MainApp() {
               onRecordBehaviorSignal={handleRecordBehaviorSignal}
               onUpdateFocusPrefs={handleUpdateFocusPrefs}
               composerTriggerCount={composerTriggerCount}
+              visibilityOptions={visibilityOptions}
             />
           )}
 
@@ -3445,6 +3644,169 @@ function MainApp() {
                       ))}
                     </div>
                   )}
+                  <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                    <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                      The family
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      The family is the widest circle — wider than any one household.
+                      Anything aimed at the family reaches everyone in it, in every
+                      household that belongs to it. A household joins the family when
+                      its owner links it; the household's people join the family's
+                      roster at the same time.
+                    </p>
+                    {families.length === 0 ? (
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        No family yet. Create one to draw the widest circle.
+                      </p>
+                    ) : (
+                      families.map((f) => (
+                        <div
+                          key={f.id}
+                          className="flex items-center justify-between gap-2 px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                        >
+                          <span className="text-xs text-slate-900 dark:text-slate-100">
+                            {f.name}
+                            <span className="text-slate-500 dark:text-slate-400">
+                              {' '}
+                              — {f.memberIds.length} people
+                              {activeFamily?.id === f.id ? ' · this household is linked' : ''}
+                            </span>
+                          </span>
+                          {activeFamily?.id !== f.id &&
+                            f.ownerId === user.uid &&
+                            activeHousehold.ownerId === user.uid && (
+                              <button
+                                type="button"
+                                onClick={() => void handleLinkHouseholdToFamily(f)}
+                                className="min-h-[36px] px-3 text-xs font-medium text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 hover:bg-teal-50 dark:hover:bg-teal-950/40 rounded-lg"
+                              >
+                                Link this household
+                              </button>
+                            )}
+                        </div>
+                      ))
+                    )}
+                    <form onSubmit={handleCreateFamily} className="flex gap-2">
+                      <input
+                        type="text"
+                        value={familyNameDraft}
+                        onChange={(e) => setFamilyNameDraft(e.target.value)}
+                        placeholder="Family name — for example, McWhirter"
+                        className="flex-1 min-h-[42px] px-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                      />
+                      <button
+                        type="submit"
+                        className="min-h-[42px] inline-flex items-center px-3.5 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-lg"
+                      >
+                        Create family
+                      </button>
+                    </form>
+                    {familyFeedback && (
+                      <p className="text-xs text-teal-700 dark:text-teal-400">{familyFeedback}</p>
+                    )}
+                  </div>
+
+                  <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                    <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                      Circles
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      A circle is a set of people you draw yourself — any shape at all.
+                      Only its members can see the circle, or anything aimed at it.
+                      A circle can be permanent, or temporary with a closing date;
+                      when it closes, its records keep their owner and their other
+                      tags.
+                    </p>
+                    {circles.length === 0 ? (
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        No circles yet.
+                      </p>
+                    ) : (
+                      circles.map((c) => (
+                        <div
+                          key={c.id}
+                          className="flex items-center justify-between gap-2 px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                        >
+                          <span className="text-xs text-slate-900 dark:text-slate-100">
+                            {c.name}
+                            <span className="text-slate-500 dark:text-slate-400">
+                              {' '}
+                              — {c.memberIds.length} people
+                              {c.temporary
+                                ? ` · temporary${c.expiresAtKey ? `, closes ${c.expiresAtKey}` : ''}`
+                                : ' · permanent'}
+                            </span>
+                          </span>
+                          {c.ownerId === user.uid && (
+                            <button
+                              type="button"
+                              onClick={() => void handleDeleteCircle(c)}
+                              className="min-h-[36px] px-3 text-xs font-medium text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg"
+                            >
+                              End circle
+                            </button>
+                          )}
+                        </div>
+                      ))
+                    )}
+                    <form onSubmit={handleCreateCircle} className="space-y-2">
+                      <input
+                        type="text"
+                        value={circleNameDraft}
+                        onChange={(e) => setCircleNameDraft(e.target.value)}
+                        placeholder="Circle name — for example, Boat surprise"
+                        className="w-full min-h-[42px] px-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                      />
+                      {householdMembers
+                        .filter((m) => m.userId !== user.uid)
+                        .map((m) => (
+                          <label
+                            key={m.userId}
+                            className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={circlePicks.includes(m.userId)}
+                              onChange={(e) =>
+                                setCirclePicks((prev) =>
+                                  e.target.checked
+                                    ? [...prev, m.userId]
+                                    : prev.filter((x) => x !== m.userId)
+                                )
+                              }
+                            />
+                            <span>{m.displayName}</span>
+                          </label>
+                        ))}
+                      <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                        <input
+                          type="checkbox"
+                          checked={circleTemporary}
+                          onChange={(e) => setCircleTemporary(e.target.checked)}
+                        />
+                        <span>Temporary — it closes on a date</span>
+                      </label>
+                      {circleTemporary && (
+                        <input
+                          type="date"
+                          value={circleExpiry}
+                          onChange={(e) => setCircleExpiry(e.target.value)}
+                          className="min-h-[42px] px-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                        />
+                      )}
+                      <button
+                        type="submit"
+                        className="min-h-[42px] inline-flex items-center px-3.5 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-lg"
+                      >
+                        Draw circle
+                      </button>
+                      {circleFeedback && (
+                        <p className="text-xs text-teal-700 dark:text-teal-400">{circleFeedback}</p>
+                      )}
+                    </form>
+                  </div>
+
                   <div className="space-y-1.5 pt-1">
                     <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
                       Place

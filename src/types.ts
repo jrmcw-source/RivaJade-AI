@@ -248,6 +248,14 @@ export interface ScheduleTask {
   userId: string;
   householdId: string;
   memberIds: string[];
+  // Visibility (Jason, 2026-11-20): the tags carry access. scope names
+  // the ring (absent = household); circleIds name custom circles whose
+  // members join the audience; memberIds is the computed audience
+  // snapshot the rules check. The depositor (userId) owns the record
+  // always — a household, the family, or a circle only holds it.
+  scope?: 'private' | 'household' | 'family' | 'circles';
+  familyId?: string;
+  circleIds?: string[];
   title: string;
   type: TaskType;
   category: Category;
@@ -275,6 +283,14 @@ export interface ScannedDocument {
   userId: string;
   householdId: string;
   memberIds: string[];
+  // Visibility (Jason, 2026-11-20): the tags carry access. scope names
+  // the ring (absent = household); circleIds name custom circles whose
+  // members join the audience; memberIds is the computed audience
+  // snapshot the rules check. The depositor (userId) owns the record
+  // always — a household, the family, or a circle only holds it.
+  scope?: 'private' | 'household' | 'family' | 'circles';
+  familyId?: string;
+  circleIds?: string[];
   title: string;
   category: Category;
   place: string;
@@ -317,6 +333,14 @@ export interface JasonNote {
   userId: string;
   householdId: string;
   memberIds: string[];
+  // Visibility (Jason, 2026-11-20): the tags carry access. scope names
+  // the ring (absent = household); circleIds name custom circles whose
+  // members join the audience; memberIds is the computed audience
+  // snapshot the rules check. The depositor (userId) owns the record
+  // always — a household, the family, or a circle only holds it.
+  scope?: 'private' | 'household' | 'family' | 'circles';
+  familyId?: string;
+  circleIds?: string[];
   text: string;
   source: string; // 'front_door' | 'assistant' | 'voice'
   handled: boolean;
@@ -334,6 +358,14 @@ export interface MorningBriefing {
   userId: string;
   householdId: string;
   memberIds: string[];
+  // Visibility (Jason, 2026-11-20): the tags carry access. scope names
+  // the ring (absent = household); circleIds name custom circles whose
+  // members join the audience; memberIds is the computed audience
+  // snapshot the rules check. The depositor (userId) owns the record
+  // always — a household, the family, or a circle only holds it.
+  scope?: 'private' | 'household' | 'family' | 'circles';
+  familyId?: string;
+  circleIds?: string[];
   dateKey: string;
   text: string;
   createdAt?: unknown;
@@ -408,6 +440,8 @@ export interface Household {
   memberIds: string[];
   invitedEmails: string[];
   calendarToken?: string;
+  // The family this household belongs to, if any (Jason, 2026-11-20).
+  familyId?: string;
   createdAt?: unknown;
   updatedAt?: unknown;
 }
@@ -421,6 +455,35 @@ export interface HouseholdMember {
   username: string;
   role: 'owner' | 'member';
   memberIds: string[];
+}
+
+// The family (Jason, 2026-11-20): the widest ring. A roster of people
+// above the households; households link to it, and family-scoped
+// records carry the family roster as their audience. People can be
+// family before they run a household of their own.
+export interface Family {
+  id: string;
+  name: string;
+  ownerId: string;
+  ownerName: string;
+  memberIds: string[];
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+// A circle (Jason, 2026-11-20): a set of people, drawn by a user —
+// the boat circle. Permanent or temporary (expiresAtKey is the local
+// date it closes). Visible only to its members. The rings are the
+// circles the system draws; these are the ones people draw.
+export interface Circle {
+  id: string;
+  name: string;
+  ownerId: string;
+  memberIds: string[];
+  temporary: boolean;
+  expiresAtKey?: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
 }
 
 export interface ProjectInvite {
@@ -483,6 +546,14 @@ export interface PropertyEntry {
   userId: string;
   householdId: string;
   memberIds: string[];
+  // Visibility (Jason, 2026-11-20): the tags carry access. scope names
+  // the ring (absent = household); circleIds name custom circles whose
+  // members join the audience; memberIds is the computed audience
+  // snapshot the rules check. The depositor (userId) owns the record
+  // always — a household, the family, or a circle only holds it.
+  scope?: 'private' | 'household' | 'family' | 'circles';
+  familyId?: string;
+  circleIds?: string[];
   area: PropertyEntryArea;
   place: string;
   title: string;
@@ -564,6 +635,14 @@ export interface FinanceEntry {
   userId: string;
   householdId: string;
   memberIds: string[];
+  // Visibility (Jason, 2026-11-20): the tags carry access. scope names
+  // the ring (absent = household); circleIds name custom circles whose
+  // members join the audience; memberIds is the computed audience
+  // snapshot the rules check. The depositor (userId) owns the record
+  // always — a household, the family, or a circle only holds it.
+  scope?: 'private' | 'household' | 'family' | 'circles';
+  familyId?: string;
+  circleIds?: string[];
   kind: FinanceKind;
   group: string;
   title: string;

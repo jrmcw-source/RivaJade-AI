@@ -57,6 +57,7 @@ interface ScheduleAndCalendarViewProps {
   onRecordBehaviorSignal: (signal: string) => Promise<void>;
   onUpdateFocusPrefs: (preferredFocusWindow: FocusWindow, prefersQuickWinsFirst: boolean) => Promise<void>;
   composerTriggerCount: number;
+  visibilityOptions: Array<{ value: string; label: string }>;
 }
 
 export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = ({
@@ -73,6 +74,7 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
   onRecordBehaviorSignal,
   onUpdateFocusPrefs,
   composerTriggerCount,
+  visibilityOptions,
 }) => {
   const todayIso = getLocalTodayIso();
   const [subMode, setSubMode] = useState<'calendar' | 'priority'>('calendar');
@@ -93,6 +95,7 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
   const [formType, setFormType] = useState<TaskType>('task');
   const [formCategory, setFormCategory] = useState<Category>('Household');
   const [formPlace, setFormPlace] = useState('');
+  const [formVisibility, setFormVisibility] = useState('household');
   const [formDueDate, setFormDueDate] = useState(todayIso);
   const [formDueTime, setFormDueTime] = useState('');
   const [formEstimatedMinutes, setFormEstimatedMinutes] = useState(30);
@@ -124,6 +127,7 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
     setFormType('task');
     setFormCategory('Household');
     setFormPlace('');
+    setFormVisibility('household');
     setFormDueDate(defaultDate);
     setFormDueTime('');
     setFormEstimatedMinutes(30);
@@ -175,6 +179,21 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
           type: formType,
           category: formCategory,
           place: formPlace,
+          ...(formVisibility === 'private'
+            ? { scope: 'private' as const, familyId: '', circleIds: [] as string[] }
+            : formVisibility.startsWith('family:')
+              ? {
+                  scope: 'family' as const,
+                  familyId: formVisibility.slice('family:'.length),
+                  circleIds: [] as string[],
+                }
+              : formVisibility.startsWith('circle:')
+                ? {
+                    scope: 'circles' as const,
+                    familyId: '',
+                    circleIds: [formVisibility.slice('circle:'.length)],
+                  }
+                : {}),
           dueDate: formDueDate,
           dueTime: formDueTime,
           estimatedMinutes: Number(formEstimatedMinutes) || 30,
@@ -1256,6 +1275,28 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
                 ))}
               </select>
             </div>
+
+            {!editingTaskId && visibilityOptions.length > 0 && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                  Who can see this?
+                </label>
+                <select
+                  value={formVisibility}
+                  onChange={(e) => setFormVisibility(e.target.value)}
+                  className="w-full min-h-[44px] px-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                >
+                  {visibilityOptions.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Whatever you add stays yours — this only chooses who can see it.
+                </p>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
