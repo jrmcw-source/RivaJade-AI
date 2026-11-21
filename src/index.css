@@ -28,3 +28,32 @@
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
+
+/* Print (pass 18): one record on paper, nothing else. The
+   print area renders only what the reader can already see —
+   a sealed record prints its envelope, never its sealed words. */
+@media screen {
+  .steward-print {
+    display: none;
+  }
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .steward-print {
+    display: block;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 24px;
+    background: #fff;
+    color: #000;
+    visibility: visible;
+  }
+  .steward-print * {
+    visibility: visible;
+  }
+}

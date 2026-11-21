@@ -4293,6 +4293,19 @@ function MainApp() {
     }
   }
 
+  const [printJob, setPrintJob] = useState<
+    | { type: 'sheet'; sheet: EmergencySheet }
+    | { type: 'list'; list: SharedList }
+    | null
+  >(null);
+
+  function doPrint(
+    job: { type: 'sheet'; sheet: EmergencySheet } | { type: 'list'; list: SharedList }
+  ) {
+    setPrintJob(job);
+    window.setTimeout(() => window.print(), 80);
+  }
+
   const [listFeedback, setListFeedback] = useState('');
   const [listTitle, setListTitle] = useState('');
   const [listScope, setListScope] = useState<'private' | 'household' | 'family'>('household');
@@ -7970,6 +7983,18 @@ function MainApp() {
                           {sh.notes}
                         </p>
                       )}
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          onClick={() => doPrint({ type: 'sheet', sheet: sh })}
+                          className="min-h-[32px] px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-md text-slate-700 dark:text-slate-200"
+                        >
+                          Print this sheet
+                        </button>
+                        <span className="ml-2 text-[11px] text-slate-400">
+                          For the babysitter, the trip, the fridge door.
+                        </span>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -8045,15 +8070,24 @@ function MainApp() {
                               : 'Household'}
                         </span>
                       </p>
-                      {user && list.userId === user.uid && (
+                      <span className="flex items-center gap-3">
                         <button
                           type="button"
-                          onClick={() => void handleDeleteList(list)}
-                          className="text-[11px] text-slate-400 hover:text-red-500"
+                          onClick={() => doPrint({ type: 'list', list })}
+                          className="text-[11px] text-slate-400 hover:text-slate-600"
                         >
-                          Delete list
+                          Print
                         </button>
-                      )}
+                        {user && list.userId === user.uid && (
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteList(list)}
+                            className="text-[11px] text-slate-400 hover:text-red-500"
+                          >
+                            Delete list
+                          </button>
+                        )}
+                      </span>
                     </div>
                     <div className="space-y-1">
                       {(list.items || []).map((item, idx) => (
@@ -9737,6 +9771,57 @@ function MainApp() {
       />
 
       {/* Cross-App AI Assistant Slide-Over Drawer */}
+      {printJob && (
+        <div className="steward-print">
+          {printJob.type === 'sheet' && (
+            <div>
+              <h1 style={{ fontSize: '22px', marginBottom: '4px' }}>
+                Emergency sheet — {printJob.sheet.forName}
+              </h1>
+              <p style={{ fontSize: '12px', marginBottom: '16px' }}>
+                Kept by the family in Steward. Steward is an aid, not a legal verdict
+                or a medical diagnostic — for those, get your own doctor and a lawyer.
+              </p>
+              {(
+                [
+                  ['Call', printJob.sheet.contacts],
+                  ['Doctors', printJob.sheet.doctors],
+                  ['Allergies', printJob.sheet.allergies],
+                  ['Medications', printJob.sheet.medicationsNote],
+                  ['Blood type', printJob.sheet.bloodType],
+                  ['Know', printJob.sheet.conditionsNote],
+                  ['Wishes', printJob.sheet.wishes],
+                  ['Care notes — do\'s and don\'ts, house rules, who to call', printJob.sheet.careNotes],
+                  ['Notes', printJob.sheet.notes],
+                ] as Array<[string, string | undefined]>
+              )
+                .filter(([, v]) => v && v.trim())
+                .map(([label, v]) => (
+                  <div key={label} style={{ marginBottom: '12px' }}>
+                    <p style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase' }}>
+                      {label}
+                    </p>
+                    <p style={{ fontSize: '14px', whiteSpace: 'pre-line' }}>{v}</p>
+                  </div>
+                ))}
+            </div>
+          )}
+          {printJob.type === 'list' && (
+            <div>
+              <h1 style={{ fontSize: '22px', marginBottom: '16px' }}>{printJob.list.title}</h1>
+              {(printJob.list.items || []).map((item, idx) => (
+                <p key={idx} style={{ fontSize: '14px', marginBottom: '6px' }}>
+                  {item.done ? '☑' : '☐'} {item.text}
+                </p>
+              ))}
+              <p style={{ fontSize: '12px', marginTop: '16px' }}>
+                Kept by the family in Steward.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
       <AIAssistantDrawer
         open={assistantOpen}
         onClose={() => setAssistantOpen(false)}

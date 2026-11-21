@@ -108,6 +108,7 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
   const [categoryFilter, setCategoryFilter] = useState<string>('All');
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [drivePhotoSrc, setDrivePhotoSrc] = useState<Record<string, string>>({});
+  const [docPrint, setDocPrint] = useState(false);
 
   // If the app server's copy of a photo is gone, show the photo from its
   // permanent home in Google Drive instead.
@@ -506,6 +507,52 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
         </div>
       </div>
 
+      {docPrint && selectedDoc && (
+        <div className="steward-print">
+          <h1 style={{ fontSize: '22px', marginBottom: '4px' }}>{selectedDoc.title}</h1>
+          <p style={{ fontSize: '12px', marginBottom: '16px' }}>
+            {selectedDoc.category}
+            {selectedDoc.place ? ` — ${selectedDoc.place}` : ''}
+            {selectedDoc.detectedDate ? ` — ${selectedDoc.detectedDate}` : ''}
+          </p>
+          {(drivePhotoSrc[selectedDoc.id] || selectedDoc.imageUrl) && (
+            <img
+              src={drivePhotoSrc[selectedDoc.id] || selectedDoc.imageUrl}
+              alt={selectedDoc.title}
+              style={{ maxWidth: '100%', marginBottom: '16px' }}
+            />
+          )}
+          {selectedDoc.summary && (
+            <p style={{ fontSize: '14px', whiteSpace: 'pre-line', marginBottom: '12px' }}>
+              {selectedDoc.summary}
+            </p>
+          )}
+          {(selectedDoc.keyDetails || []).length > 0 && (
+            <div style={{ marginBottom: '12px' }}>
+              {selectedDoc.keyDetails.map((d, i) => (
+                <p key={i} style={{ fontSize: '13px' }}>
+                  • {d}
+                </p>
+              ))}
+            </div>
+          )}
+          {selectedDoc.ocrText && (
+            <p style={{ fontSize: '13px', whiteSpace: 'pre-line', marginBottom: '12px' }}>
+              {selectedDoc.ocrText}
+            </p>
+          )}
+          {selectedDoc.notes && (
+            <p style={{ fontSize: '13px', whiteSpace: 'pre-line', marginBottom: '12px' }}>
+              {selectedDoc.notes}
+            </p>
+          )}
+          <p style={{ fontSize: '12px', marginTop: '16px' }}>
+            Kept by the family in Steward. Steward is an aid, not a legal verdict or
+            a medical diagnostic.
+          </p>
+        </div>
+      )}
+
       {/* Family photo shelf: pictures kept as pictures. A photo
           rides here when its document carries the 'photo' tag;
           the shelf shows only what the reader may already see. */}
@@ -886,6 +933,22 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
                   </span>
                 </div>
               )}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDocPrint(true);
+                    window.setTimeout(() => window.print(), 80);
+                  }}
+                  className="min-h-[36px] px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-700 dark:text-slate-200"
+                >
+                  Print this record
+                </button>
+                <span className="text-[11px] text-slate-400">
+                  Prints what you can see here — a sealed record prints its envelope,
+                  never its sealed words.
+                </span>
+              </div>
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
