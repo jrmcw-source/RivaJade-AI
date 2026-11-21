@@ -74,6 +74,7 @@ import {
   childDeciderIds,
   personIsMinor,
   personDeciderIds,
+  isEqualCustody,
   upcomingOccasions,
   computeStreamLists,
   effectiveRecordKind,
@@ -84,6 +85,7 @@ import {
   Family,
   FamilyPerson,
   Circle,
+  ChildChangeProposal,
   familyHeadName,
   familyHeadUid,
   ResetRequest,
@@ -370,6 +372,8 @@ function MainApp() {
   const [ownEmergencySheets, setOwnEmergencySheets] = useState<EmergencySheet[]>([]);
   const [sharedEmergencySheets, setSharedEmergencySheets] = useState<EmergencySheet[]>([]);
   const [deciderEmergencySheets, setDeciderEmergencySheets] = useState<EmergencySheet[]>([]);
+  const [childProposalsAsDecider, setChildProposalsAsDecider] = useState<ChildChangeProposal[]>([]);
+  const [childProposalsMine, setChildProposalsMine] = useState<ChildChangeProposal[]>([]);
   const [sharedDirectoryEntries, setSharedDirectoryEntries] = useState<DirectoryEntry[]>([]);
   const [dirName, setDirName] = useState('');
   const [dirBirthday, setDirBirthday] = useState('');
@@ -415,6 +419,7 @@ function MainApp() {
         incapacityDocId: string;
         custodyDocId: string;
         custodyHolderIds: string[];
+        custodyMode: 'majority' | 'equal';
       }
     >
   >({});
@@ -3915,6 +3920,47 @@ function MainApp() {
 
 
 
+  useEffect(() => {
+    if (!db || !user) {
+      setChildProposalsAsDecider([]);
+      return;
+    }
+    const proposalsRef = collection(db, 'childProposals');
+    const asDeciderQuery = query(proposalsRef, where('decidedByIds', 'array-contains', user.uid));
+    return onSnapshot(
+      asDeciderQuery,
+      (snapshot) => {
+        setChildProposalsAsDecider(
+          snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ChildChangeProposal, 'id'>) }))
+        );
+      },
+      () => setChildProposalsAsDecider([])
+    );
+  }, [user]);
+
+  useEffect(() => {
+    if (!db || !user) {
+      setChildProposalsMine([]);
+      return;
+    }
+    const proposalsRef = collection(db, 'childProposals');
+    const mineQuery = query(proposalsRef, where('proposedBy', '==', user.uid));
+    return onSnapshot(
+      mineQuery,
+      (snapshot) => {
+        setChildProposalsMine(
+          snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ChildChangeProposal, 'id'>) }))
+        );
+      },
+      () => setChildProposalsMine([])
+    );
+  }, [user]);
+
+  const childProposals = useMemo(
+    () => mergeRecordsById(childProposalsAsDecider, childProposalsMine),
+    [childProposalsAsDecider, childProposalsMine]
+  );
+
   function myDeciderChildren(): Array<{ key: string; family: Family; person: FamilyPerson }> {
     if (!user) return [];
     const out: Array<{ key: string; family: Family; person: FamilyPerson }> = [];
@@ -3941,6 +3987,7 @@ function MainApp() {
         incapacityDocId: person.incapacityDocId || '',
         custodyDocId: person.custodyDocId || '',
         custodyHolderIds: person.custodyHolderIds || [],
+        custodyMode: person.custodyMode || 'majority',
       }
     );
   }
@@ -3954,6 +4001,7 @@ function MainApp() {
     incapacityDocId: string;
     custodyDocId: string;
     custodyHolderIds: string[];
+    custodyMode: 'majority' | 'equal';
   }>) {
     const key = `${family.id}::${person.name}`;
     setChildEdits((prev) => ({
@@ -3973,6 +4021,7 @@ function MainApp() {
         const key = `${family.id}::${person.name}`;
         const edit = childEdits[key];
         if (!edit) continue;
+        if (isEqualCustody(person)) continue;
         const before = personDeciderIds(family, person);
         if (before.length === 0) continue;
         const merged: FamilyPerson = {
@@ -3984,6 +4033,7 @@ function MainApp() {
           incapacityDocId: edit.incapacityDocId,
           custodyDocId: edit.custodyDocId,
           custodyHolderIds: edit.custodyHolderIds,
+          custodyMode: edit.custodyMode,
         };
         const after = personDeciderIds(family, merged);
         for (const removed of before.filter((uid) => !after.includes(uid))) {
@@ -3999,10 +4049,37 @@ function MainApp() {
         }
       }
     }
+    const sameList = (a: string[] = [], b: string[] = []) =>
+      [...a].sort().join('|') === [...b].sort().join('|');
+    const equalProposals: Array<{
+      person: FamilyPerson;
+      edit: (typeof childEdits)[string];
+    }> = [];
+    if (user) {
+      for (const person of family.people || []) {
+        const edit = childEdits[`${family.id}::${person.name}`];
+        if (!edit || !isEqualCustody(person)) continue;
+        const changed =
+          !sameList(edit.parentIds, person.parentIds) ||
+          !sameList(edit.guardianIds, person.guardianIds) ||
+          edit.guardianshipDocId !== (person.guardianshipDocId || '') ||
+          edit.delegateToHead !== (person.delegateToHead === true) ||
+          edit.custodyDocId !== (person.custodyDocId || '') ||
+          edit.custodyMode !== (person.custodyMode || 'majority') ||
+          !sameList(edit.custodyHolderIds, person.custodyHolderIds) ||
+          edit.emancipatedDocId !== (person.emancipatedDocId || '') ||
+          edit.incapacityDocId !== (person.incapacityDocId || '');
+        if (changed && personDeciderIds(family, person).includes(user.uid)) {
+          equalProposals.push({ person, edit });
+        }
+      }
+    }
+    const equalNames = new Set(equalProposals.map((x) => x.person.name));
     const people = (family.people || []).map((person) => {
       const key = `${family.id}::${person.name}`;
       const edit = childEdits[key];
       if (!edit) return person;
+      if (equalNames.has(person.name)) return person;
       return {
         ...person,
         parentIds: edit.parentIds,
@@ -4013,6 +4090,7 @@ function MainApp() {
         incapacityDocId: edit.incapacityDocId,
         custodyDocId: edit.custodyDocId,
         custodyHolderIds: edit.custodyHolderIds,
+        custodyMode: edit.custodyMode,
       };
     });
     try {
@@ -4020,7 +4098,39 @@ function MainApp() {
         people,
         updatedAt: serverTimestamp(),
       });
-      setChildFeedback(`Saved for the ${family.name} family.`);
+      if (user) for (const { person, edit } of equalProposals) {
+        await addDoc(collection(db, 'childProposals'), {
+          kind: 'roster',
+          familyId: family.id,
+          subjectName: person.name,
+          decidedByIds: personDeciderIds(family, person),
+          proposedBy: user.uid,
+          proposedByName: userProfile?.displayName || user.displayName || 'A parent',
+          rosterPayload: {
+            parentIds: edit.parentIds,
+            guardianIds: edit.guardianIds,
+            guardianshipDocId: edit.guardianshipDocId,
+            delegateToHead: edit.delegateToHead,
+            custodyDocId: edit.custodyDocId,
+            custodyMode: edit.custodyMode,
+            custodyHolderIds: edit.custodyHolderIds,
+            emancipatedDocId: edit.emancipatedDocId,
+            incapacityDocId: edit.incapacityDocId,
+          },
+          status: 'open',
+          approvals: [],
+          declines: [],
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+      setChildFeedback(
+        equalProposals.length > 0
+          ? `Saved for the ${family.name} family. Equal custody: the changes for ${equalProposals
+              .map((x) => x.person.name)
+              .join(', ')} were proposed to the other parent — those rows stay exactly as they were until confirmed.`
+          : `Saved for the ${family.name} family.`
+      );
     } catch (err) {
       setChildFeedback(
         err instanceof Error
@@ -4051,6 +4161,94 @@ function MainApp() {
       mine.subjectFamilyId && mine.subjectName ? `${mine.subjectFamilyId}::${mine.subjectName}` : ''
     );
     setSheetFeedback('Your sheet is loaded below. Saving replaces it.');
+  }
+
+  async function handleConfirmChildProposal(proposal: ChildChangeProposal) {
+    if (!db || !user) return;
+    try {
+      if (proposal.kind === 'sheet' && proposal.sheetPayload) {
+        if (proposal.sheetId) {
+          await updateDoc(doc(db, 'emergencySheets', proposal.sheetId), {
+            ...(proposal.sheetPayload as Record<string, unknown>),
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          await setDoc(doc(db, 'emergencySheets', createSafeId('emg')), {
+            ...(proposal.sheetPayload as Record<string, unknown>),
+            userId: user.uid,
+            householdId: activeHousehold?.householdId || '',
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        }
+        await updateDoc(doc(db, 'childProposals', proposal.id), {
+          approvals: [...(proposal.approvals || []), user.uid],
+          status: 'done',
+          updatedAt: serverTimestamp(),
+        });
+        setChildFeedback(
+          `Confirmed and applied — ${proposal.subjectName}'s sheet now reads as both parents agreed.`
+        );
+        return;
+      }
+      await updateDoc(doc(db, 'childProposals', proposal.id), {
+        approvals: [...(proposal.approvals || []), user.uid],
+        status: 'approved',
+        updatedAt: serverTimestamp(),
+      });
+      await handleApplyChildProposal({ ...proposal, status: 'approved' });
+    } catch (err) {
+      setChildFeedback(
+        err instanceof Error ? err.message : 'That confirmation did not go through.'
+      );
+    }
+  }
+
+  async function handleApplyChildProposal(proposal: ChildChangeProposal) {
+    if (!db || !user || proposal.kind !== 'roster' || !proposal.rosterPayload) return;
+    const fam = families.find((f) => f.id === proposal.familyId);
+    if (!fam) {
+      setChildFeedback('That family is not on this desk.');
+      return;
+    }
+    try {
+      const people = (fam.people || []).map((person) =>
+        person.name === proposal.subjectName
+          ? { ...person, ...(proposal.rosterPayload as Partial<FamilyPerson>) }
+          : person
+      );
+      await updateDoc(doc(db, 'families', fam.id), {
+        people,
+        updatedAt: serverTimestamp(),
+      });
+      await updateDoc(doc(db, 'childProposals', proposal.id), {
+        status: 'done',
+        updatedAt: serverTimestamp(),
+      });
+      setChildFeedback(
+        `Applied — ${proposal.subjectName}'s deciders now read as both parents agreed.`
+      );
+    } catch {
+      setChildFeedback(
+        'Confirmed by both parents. Writing it to the roster takes the family record\'s keeper — it stays ready here until they press Apply.'
+      );
+    }
+  }
+
+  async function handleDeclineChildProposal(proposal: ChildChangeProposal) {
+    if (!db || !user) return;
+    try {
+      await updateDoc(doc(db, 'childProposals', proposal.id), {
+        declines: [...(proposal.declines || []), user.uid],
+        status: 'declined',
+        updatedAt: serverTimestamp(),
+      });
+      setChildFeedback(
+        `Declined. ${proposal.subjectName}'s record stays exactly as it was — that is what the rule is for.`
+      );
+    } catch (err) {
+      setChildFeedback(err instanceof Error ? err.message : 'That did not go through.');
+    }
   }
 
   async function handleSaveEmergencySheet() {
@@ -4087,6 +4285,41 @@ function MainApp() {
       memberIds,
       updatedAt: serverTimestamp(),
     };
+    if (subject && isEqualCustody(subject.person)) {
+      const sheetPayload: Record<string, unknown> = { ...payload };
+      delete sheetPayload.updatedAt;
+      const existing = emergencySheets.find(
+        (sh) =>
+          sh.subjectFamilyId === subject.family.id &&
+          sh.subjectName === subject.person.name &&
+          (sh.userId === user.uid || (sh.decidedByIds || []).includes(user.uid))
+      );
+      try {
+        await addDoc(collection(db, 'childProposals'), {
+          kind: 'sheet',
+          familyId: subject.family.id,
+          subjectName: subject.person.name,
+          decidedByIds: personDeciderIds(subject.family, subject.person),
+          proposedBy: user.uid,
+          proposedByName: userProfile?.displayName || user.displayName || 'A parent',
+          sheetId: existing?.id || '',
+          sheetPayload,
+          status: 'open',
+          approvals: [],
+          declines: [],
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        setSheetFeedback(
+          `Equal custody takes both parents — this change is proposed to the other parent. Until they confirm it, ${subject.person.name}'s sheet stays exactly as it was.`
+        );
+      } catch (err) {
+        setSheetFeedback(
+          err instanceof Error ? err.message : 'That proposal did not go through.'
+        );
+      }
+      return;
+    }
     try {
       const mine = subject
         ? emergencySheets.find(
@@ -7637,7 +7870,10 @@ function MainApp() {
                 no override of their own: a judge's emancipation, or turning 18, are the
                 only doors out of being decided for. The same court paper governs an
                 adult ruled incapable — their guardians decide, with the document on
-                file in the legal-care rows below.
+                file in the legal-care rows below. Steward is an aid, not a legal
+                verdict or a medical diagnostic — for those, get your own doctor and
+                a lawyer. The court's documents are the authority; the desk follows
+                them.
               </p>
               {families.map((fam) => {
                 const minors = (fam.people || []).filter((person) => personIsMinor(fam, person));
@@ -7766,6 +8002,29 @@ function MainApp() {
                             </span>
                           </label>
                           {edit.custodyDocId && (
+                            <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                              <span>How it splits:</span>
+                              <select
+                                value={edit.custodyMode}
+                                onChange={(e) =>
+                                  setChildEdit(fam, person, {
+                                    custodyMode: e.target.value as 'majority' | 'equal',
+                                  })
+                                }
+                                className="min-h-[32px] px-2 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                              >
+                                <option value="majority">Majority — the holder decides</option>
+                                <option value="equal">Equal — it takes both parents</option>
+                              </select>
+                              {edit.custodyMode === 'equal' && (
+                                <span className="text-[11px] text-slate-400">
+                                  A change is proposed to the other parent; until they
+                                  confirm it, the record stays exactly as it was.
+                                </span>
+                              )}
+                            </label>
+                          )}
+                          {edit.custodyDocId && edit.custodyMode !== 'equal' && (
                             <div className="flex flex-wrap gap-x-4 gap-y-1">
                               <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
                                 Custody held by:
@@ -7882,6 +8141,63 @@ function MainApp() {
                   </div>
                 );
               })}
+              {childProposals.filter((pr) => pr.status === 'open' || pr.status === 'approved').length > 0 && (
+                <div className="space-y-2 pt-1">
+                  <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                    Waiting on both parents — equal custody changes nothing until the
+                    other parent confirms:
+                  </p>
+                  {childProposals
+                    .filter((pr) => pr.status === 'open' || pr.status === 'approved')
+                    .map((pr) => (
+                      <div
+                        key={pr.id}
+                        className="px-3 py-2 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 rounded-lg space-y-1.5"
+                      >
+                        <p className="text-sm text-slate-900 dark:text-slate-100">
+                          {pr.kind === 'sheet' ? 'Emergency sheet change' : 'Deciders change'}{' '}
+                          for <span className="font-medium">{pr.subjectName}</span> — proposed
+                          by {pr.proposedByName}
+                          {pr.status === 'approved' ? ', confirmed by both parents' : ''}.
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {pr.status === 'open' && user && pr.proposedBy !== user.uid && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => void handleConfirmChildProposal(pr)}
+                                className="min-h-[32px] px-3 text-xs bg-teal-700 hover:bg-teal-600 text-white rounded-md"
+                              >
+                                Confirm
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handleDeclineChildProposal(pr)}
+                                className="min-h-[32px] px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-md text-slate-700 dark:text-slate-200"
+                              >
+                                Decline — the record stays as it was
+                              </button>
+                            </>
+                          )}
+                          {pr.status === 'open' && user && pr.proposedBy === user.uid && (
+                            <span className="text-[11px] text-slate-400">
+                              Waiting on the other parent.
+                            </span>
+                          )}
+                          {pr.status === 'approved' && pr.kind === 'roster' && (
+                            <button
+                              type="button"
+                              onClick={() => void handleApplyChildProposal(pr)}
+                              className="min-h-[32px] px-3 text-xs bg-teal-700 hover:bg-teal-600 text-white rounded-md"
+                            >
+                              Apply to the roster
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
               {childFeedback && (
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">{childFeedback}</p>
               )}

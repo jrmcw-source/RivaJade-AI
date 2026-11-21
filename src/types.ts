@@ -1010,6 +1010,38 @@ export interface FamilyPerson {
   // document, both parents stand.
   custodyDocId?: string;
   custodyHolderIds?: string[];
+  // How the custody document splits the deciding (Jason,
+  // 2026-11-21): 'majority' — the holder(s) decide alone;
+  // 'equal' — it takes both parents, and where they cannot
+  // compromise the record remains however it was last inputted.
+  custodyMode?: 'majority' | 'equal';
+}
+
+// Equal custody's joint act, in the open like the Give: one
+// parent proposes a change to a child's standing records, the
+// other confirms, and until they do nothing moves. Steward is
+// an aid here, not a legal verdict — the court's document on
+// the child's row is the authority; this only carries it out.
+export interface ChildChangeProposal {
+  id: string;
+  kind: 'sheet' | 'roster';
+  familyId: string;
+  subjectName: string;
+  decidedByIds: string[];
+  proposedBy: string;
+  proposedByName: string;
+  sheetId?: string;
+  sheetPayload?: Record<string, unknown>;
+  rosterPayload?: Record<string, unknown>;
+  status: 'open' | 'approved' | 'declined' | 'done';
+  approvals: string[];
+  declines: string[];
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+export function isEqualCustody(person: FamilyPerson): boolean {
+  return Boolean(person.custodyDocId) && person.custodyMode === 'equal';
 }
 
 // Who decides for a person who does not decide for themselves

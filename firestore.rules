@@ -1395,7 +1395,24 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
-    function isValidGiveProposal(data) {
+    function isValidChildProposal(data) {
+  return data.keys().hasAll(['kind', 'familyId', 'subjectName', 'decidedByIds', 'proposedBy', 'proposedByName', 'status', 'approvals', 'declines', 'createdAt', 'updatedAt'])
+    && data.keys().hasOnly(['kind', 'familyId', 'subjectName', 'decidedByIds', 'proposedBy', 'proposedByName', 'sheetId', 'sheetPayload', 'rosterPayload', 'status', 'approvals', 'declines', 'createdAt', 'updatedAt'])
+    && (data.kind == 'sheet' || data.kind == 'roster')
+    && data.familyId is string && data.familyId.size() > 0 && data.familyId.size() <= 128
+    && data.subjectName is string && data.subjectName.size() > 0 && data.subjectName.size() <= 200
+    && data.decidedByIds is list && data.decidedByIds.size() <= 50
+    && data.proposedBy is string && data.proposedBy.size() > 0 && data.proposedBy.size() <= 128
+    && data.proposedByName is string && data.proposedByName.size() <= 200
+    && (!('sheetId' in data) || (data.sheetId is string && data.sheetId.size() <= 128))
+    && (!('sheetPayload' in data) || data.sheetPayload is map)
+    && (!('rosterPayload' in data) || data.rosterPayload is map)
+    && (data.status == 'open' || data.status == 'approved' || data.status == 'declined' || data.status == 'done')
+    && data.approvals is list && data.approvals.size() <= 50
+    && data.declines is list && data.declines.size() <= 50;
+}
+
+function isValidGiveProposal(data) {
       return data.keys().hasAll([
           'collectionName',
           'recordId',
@@ -1981,6 +1998,39 @@ service cloud.firestore {
         ]));
       allow delete: if isVerifiedUser() && isValidId(sheetId)
         && existing().userId == request.auth.uid;
+    }
+
+    match /childProposals/{proposalId} {
+      // Equal custody's joint act: the child's deciders read the
+      // proposal; the other parent's confirmation is what moves
+      // the record. Votes only grow; the payload never changes.
+      allow get: if isSignedIn() && isValidId(proposalId)
+        && (request.auth.uid in existing().decidedByIds
+          || existing().proposedBy == request.auth.uid);
+      allow list: if isSignedIn()
+        && (request.auth.uid in resource.data.get('decidedByIds', [])
+          || resource.data.proposedBy == request.auth.uid);
+      allow create: if isVerifiedUser()
+        && isValidId(proposalId)
+        && isValidChildProposal(incoming())
+        && incoming().proposedBy == request.auth.uid
+        && request.auth.uid in incoming().decidedByIds
+        && incoming().status == 'open'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(proposalId)
+        && isValidChildProposal(incoming())
+        && incoming().proposedBy == existing().proposedBy
+        && incoming().decidedByIds == existing().decidedByIds
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && request.auth.uid in existing().decidedByIds
+        && incoming().approvals.hasAll(existing().approvals)
+        && incoming().declines.hasAll(existing().declines)
+        && incoming().diff(existing()).affectedKeys().hasOnly(['approvals', 'declines', 'status', 'updatedAt']);
+      allow delete: if isVerifiedUser() && isValidId(proposalId)
+        && existing().proposedBy == request.auth.uid;
     }
 
     match /giveProposals/{proposalId} {
