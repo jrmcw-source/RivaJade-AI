@@ -87,6 +87,7 @@ import {
   Credential,
   GiveProposal,
   GiftEntry,
+  DirectoryEntry,
   ProjectInvite,
   ProjectMember,
   ProjectTask,
@@ -358,6 +359,18 @@ function MainApp() {
   const [giveProposalsForMe, setGiveProposalsForMe] = useState<GiveProposal[]>([]);
   const [giveTarget, setGiveTarget] = useState('');
   const [giveFeedback, setGiveFeedback] = useState('');
+  const [ownDirectoryEntries, setOwnDirectoryEntries] = useState<DirectoryEntry[]>([]);
+  const [sharedDirectoryEntries, setSharedDirectoryEntries] = useState<DirectoryEntry[]>([]);
+  const [dirName, setDirName] = useState('');
+  const [dirPhysical, setDirPhysical] = useState('');
+  const [dirBilling, setDirBilling] = useState('');
+  const [dirPhonesText, setDirPhonesText] = useState('');
+  const [dirEmailsText, setDirEmailsText] = useState('');
+  const [dirNotes, setDirNotes] = useState('');
+  const [dirScope, setDirScope] = useState<'private' | 'household' | 'family'>('family');
+  const [dirFamilyId, setDirFamilyId] = useState('');
+  const [dirEditingId, setDirEditingId] = useState('');
+  const [dirFeedback, setDirFeedback] = useState('');
   const [sharedAccountRecords, setSharedAccountRecords] = useState<AccountRecord[]>([]);
   const [acctTitle, setAcctTitle] = useState('');
   const [acctUsername, setAcctUsername] = useState('');
@@ -642,6 +655,28 @@ function MainApp() {
       (err) => handleFirestoreError(err, OperationType.LIST, 'giveProposals')
     );
 
+    const unsubDirOwn = onSnapshot(
+      query(collection(db, 'directoryEntries'), where('userId', '==', user.uid)),
+      (snap) => {
+        setOwnDirectoryEntries(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<DirectoryEntry, 'id'>) }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'directoryEntries')
+    );
+
+    const unsubDirShared = onSnapshot(
+      query(collection(db, 'directoryEntries'), where('memberIds', 'array-contains', user.uid)),
+      (snap) => {
+        setSharedDirectoryEntries(
+          snap.docs
+            .map((d) => ({ id: d.id, ...(d.data() as Omit<DirectoryEntry, 'id'>) }))
+            .filter((e) => e.userId !== user.uid)
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'directoryEntries')
+    );
+
     const unsubMemories = onSnapshot(
       query(collection(db, 'voiceMemories'), where('userId', '==', user.uid)),
       (snap) => {
@@ -917,6 +952,8 @@ function MainApp() {
       unsubCredentialsShared();
       unsubGiveOwn();
       unsubGiveForMe();
+      unsubDirOwn();
+      unsubDirShared();
       unsubMemories();
       unsubJasonNotes();
       unsubJasonNotesShared();
@@ -1113,6 +1150,10 @@ function MainApp() {
   const giveProposals = useMemo(
     () => mergeRecordsById(giveProposalsOwn, giveProposalsForMe),
     [giveProposalsOwn, giveProposalsForMe]
+  );
+  const directoryEntries = useMemo(
+    () => mergeRecordsById(ownDirectoryEntries, sharedDirectoryEntries),
+    [ownDirectoryEntries, sharedDirectoryEntries]
   );
 
   const propertyEntries = useMemo(
@@ -2707,6 +2748,75 @@ function MainApp() {
       }
     } catch (err) {
       setGiveFeedback(err instanceof Error ? err.message : 'The give could not be completed.');
+    }
+  }
+
+
+  // ---- Family directory (Jason, 2026-11-21) ----
+
+  function handleEditDirectoryEntry(entry: DirectoryEntry) {
+    setDirEditingId(entry.id);
+    setDirName(entry.displayName || '');
+    setDirPhysical(entry.physicalAddress || '');
+    setDirBilling(entry.billingAddress || '');
+    setDirPhonesText((entry.phones || []).join('\n'));
+    setDirEmailsText((entry.emails || []).join('\n'));
+    setDirNotes(entry.notes || '');
+    setDirScope(entry.scope === 'private' || entry.scope === 'household' ? entry.scope : 'family');
+    setDirFamilyId(entry.familyId || '');
+    setDirFeedback('Editing your directory entry below.');
+  }
+
+  async function handleSaveDirectoryEntry() {
+    if (!user) return;
+    const displayName = dirName.trim();
+    if (!displayName) {
+      setDirFeedback('The entry needs the name the family knows you by.');
+      return;
+    }
+    const phones = dirPhonesText.split('\n').map((x) => x.trim()).filter(Boolean).slice(0, 6);
+    const emails = dirEmailsText.split('\n').map((x) => x.trim()).filter(Boolean).slice(0, 6);
+    const memberIds = audienceFor(dirScope, dirFamilyId, [], activeHousehold?.householdId || '', 'documents');
+    const payload: Record<string, unknown> = {
+      displayName,
+      physicalAddress: dirPhysical.trim(),
+      billingAddress: dirBilling.trim(),
+      phones,
+      emails,
+      notes: dirNotes.trim(),
+      scope: dirScope,
+      familyId: dirScope === 'family' ? dirFamilyId : '',
+      circleIds: [],
+      memberIds,
+      updatedAt: serverTimestamp(),
+    };
+    try {
+      if (dirEditingId) {
+        await updateDoc(doc(db, 'directoryEntries', dirEditingId), payload);
+        setDirFeedback('Your directory entry is updated.');
+      } else {
+        const id = createSafeId('dir');
+        await setDoc(doc(db, 'directoryEntries', id), {
+          ...payload,
+          userId: user.uid,
+          householdId: activeHousehold?.householdId || '',
+          createdAt: serverTimestamp(),
+        });
+        setDirEditingId(id);
+        setDirFeedback('Your directory entry is in. The family sees exactly the reach you picked.');
+      }
+    } catch (err) {
+      setDirFeedback(err instanceof Error ? err.message : 'The entry could not be saved.');
+    }
+  }
+
+  async function handleDeleteDirectoryEntry(entry: DirectoryEntry) {
+    try {
+      await deleteDoc(doc(db, 'directoryEntries', entry.id));
+      if (dirEditingId === entry.id) setDirEditingId('');
+      setDirFeedback('Your directory entry is removed.');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `directoryEntries/${entry.id}`);
     }
   }
 
@@ -6329,6 +6439,169 @@ function MainApp() {
                 ))}
               {giveFeedback && (
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">{giveFeedback}</p>
+              )}
+            </div>
+
+            <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                Family directory
+              </h3>
+              <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                One entry per person: the full address record and every way to reach them.
+                A Physical Address is where the building is. A Billing Address is only where
+                billing mail goes — it says nothing about location, and the two are never
+                merged. You choose how far your own entry reaches; leave yourself out
+                entirely by not making one.
+              </p>
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  value={dirName}
+                  onChange={(e) => setDirName(e.target.value)}
+                  placeholder="Name the family knows you by"
+                  className="w-full min-h-[38px] px-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                />
+                <textarea
+                  value={dirPhysical}
+                  onChange={(e) => setDirPhysical(e.target.value)}
+                  placeholder={'Physical Address — where the building is\nStreet, city, state, ZIP'}
+                  rows={2}
+                  className="w-full px-2.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                />
+                <textarea
+                  value={dirBilling}
+                  onChange={(e) => setDirBilling(e.target.value)}
+                  placeholder={'Billing Address — only where billing mail goes\nStreet or PO box, city, state, ZIP'}
+                  rows={2}
+                  className="w-full px-2.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <textarea
+                    value={dirPhonesText}
+                    onChange={(e) => setDirPhonesText(e.target.value)}
+                    placeholder={'Phone numbers, one per line'}
+                    rows={2}
+                    className="w-full px-2.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                  />
+                  <textarea
+                    value={dirEmailsText}
+                    onChange={(e) => setDirEmailsText(e.target.value)}
+                    placeholder={'Email addresses, one per line'}
+                    rows={2}
+                    className="w-full px-2.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                  />
+                </div>
+                <input
+                  type="text"
+                  value={dirNotes}
+                  onChange={(e) => setDirNotes(e.target.value)}
+                  placeholder="Notes (gate code, best hours to call…) — optional"
+                  className="w-full min-h-[38px] px-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                    <span>Who can see it:</span>
+                    <select
+                      value={dirScope}
+                      onChange={(e) => setDirScope(e.target.value as 'private' | 'household' | 'family')}
+                      className="min-h-[34px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                    >
+                      <option value="private">Only me</option>
+                      <option value="household">My household</option>
+                      <option value="family">My family</option>
+                    </select>
+                  </label>
+                  {dirScope === 'family' && (
+                    <select
+                      value={dirFamilyId}
+                      onChange={(e) => setDirFamilyId(e.target.value)}
+                      className="min-h-[34px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                    >
+                      <option value="">Pick the family</option>
+                      {families.map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveDirectoryEntry()}
+                    className="min-h-[34px] px-3 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-md"
+                  >
+                    {dirEditingId ? 'Save my entry' : 'Add my entry'}
+                  </button>
+                </div>
+                {dirFeedback && (
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">{dirFeedback}</p>
+                )}
+              </div>
+              {directoryEntries.length > 0 && (
+                <div className="space-y-1.5">
+                  {directoryEntries.map((entry) => (
+                    <div
+                      key={entry.id}
+                      className="px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg space-y-0.5"
+                    >
+                      <p className="text-xs font-medium text-slate-900 dark:text-slate-100">
+                        {entry.displayName}
+                        <span className="font-normal text-slate-500 dark:text-slate-400">
+                          {' '}
+                          —{' '}
+                          {entry.userId === user.uid
+                            ? 'your entry'
+                            : entry.scope === 'family'
+                              ? 'shared with the family'
+                              : entry.scope === 'household'
+                                ? 'shared with the household'
+                                : 'shared with you'}
+                        </span>
+                      </p>
+                      {entry.physicalAddress ? (
+                        <p className="text-[11px] whitespace-pre-line text-slate-600 dark:text-slate-300">
+                          Physical Address: {entry.physicalAddress}
+                        </p>
+                      ) : null}
+                      {entry.billingAddress ? (
+                        <p className="text-[11px] whitespace-pre-line text-slate-600 dark:text-slate-300">
+                          Billing Address (mail only): {entry.billingAddress}
+                        </p>
+                      ) : null}
+                      {(entry.phones || []).map((ph) => (
+                        <p key={ph} className="text-[11px] text-slate-600 dark:text-slate-300">
+                          Phone: {ph}
+                        </p>
+                      ))}
+                      {(entry.emails || []).map((em) => (
+                        <p key={em} className="text-[11px] text-slate-600 dark:text-slate-300">
+                          Email: {em}
+                        </p>
+                      ))}
+                      {entry.notes ? (
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">{entry.notes}</p>
+                      ) : null}
+                      {entry.userId === user.uid && (
+                        <div className="flex items-center gap-1.5 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => handleEditDirectoryEntry(entry)}
+                            className="min-h-[28px] px-2 text-[11px] font-medium text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-900 rounded-md"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteDirectoryEntry(entry)}
+                            className="min-h-[28px] px-2 text-[11px] font-medium text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-md"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
 

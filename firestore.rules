@@ -1281,6 +1281,49 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidDirectoryEntry(data) {
+      return data.keys().hasAll([
+          'userId',
+          'householdId',
+          'memberIds',
+          'displayName',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId',
+          'householdId',
+          'memberIds',
+          'scope',
+          'familyId',
+          'circleIds',
+          'displayName',
+          'physicalAddress',
+          'billingAddress',
+          'phones',
+          'emails',
+          'notes',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.userId is string
+        && isValidId(data.userId)
+        && isValidHouseholdStamp(data, 'other')
+        && (!('scope' in data) || data.scope in ['private', 'household', 'family', 'circles'])
+        && (!('familyId' in data) || (data.familyId is string && data.familyId.size() <= 128))
+        && (!('circleIds' in data) || isBoundedStringList(data.circleIds, 4, 128))
+        && data.displayName is string
+        && data.displayName.size() >= 1
+        && data.displayName.size() <= 120
+        && (!('physicalAddress' in data) || (data.physicalAddress is string && data.physicalAddress.size() <= 400))
+        && (!('billingAddress' in data) || (data.billingAddress is string && data.billingAddress.size() <= 400))
+        && (!('phones' in data) || isBoundedStringList(data.phones, 6, 120))
+        && (!('emails' in data) || isBoundedStringList(data.emails, 6, 160))
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 500))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     function isValidGiveProposal(data) {
       return data.keys().hasAll([
           'collectionName',
@@ -1754,6 +1797,41 @@ service cloud.firestore {
         && incoming().diff(existing()).affectedKeys().hasOnly(['ownerId', 'memberIds', 'updatedAt']);
       allow delete: if isVerifiedUser() && isValidId(credentialId)
         && existing().ownerId == request.auth.uid;
+    }
+
+    match /directoryEntries/{entryId} {
+      allow get: if isSignedIn() && isValidId(entryId) && canAccessRecord();
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || request.auth.uid in resource.data.get('memberIds', []));
+      allow create: if isVerifiedUser()
+        && isValidId(entryId)
+        && isValidDirectoryEntry(incoming())
+        && incoming().userId == request.auth.uid
+        && (incoming().householdId == '' || isHouseholdMember(incoming().householdId))
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(entryId)
+        && isValidDirectoryEntry(incoming())
+        && existing().userId == request.auth.uid
+        && incoming().userId == existing().userId
+        && incoming().householdId == existing().householdId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'displayName',
+          'physicalAddress',
+          'billingAddress',
+          'phones',
+          'emails',
+          'notes',
+          'memberIds',
+          'scope',
+          'familyId',
+          'circleIds',
+          'updatedAt'
+        ]);
+      allow delete: if isVerifiedUser() && isValidId(entryId)
+        && existing().userId == request.auth.uid;
     }
 
     match /giveProposals/{proposalId} {

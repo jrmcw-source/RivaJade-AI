@@ -718,6 +718,29 @@ export interface GiveProposal {
   updatedAt?: unknown;
 }
 
+// One person's family-directory entry (Jason, 2026-11-21): the
+// full addresses record and every contact slot, shared only as
+// far as the person chooses under the hierarchy. A Physical
+// Address is where the building is; a Billing Address is only
+// where billing mail goes — the two are never merged.
+export interface DirectoryEntry {
+  id: string;
+  userId: string;
+  householdId: string;
+  memberIds: string[];
+  scope?: 'private' | 'household' | 'family' | 'circles';
+  familyId?: string;
+  circleIds?: string[];
+  displayName: string;
+  physicalAddress?: string;
+  billingAddress?: string;
+  phones?: string[];
+  emails?: string[];
+  notes?: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
 // An account record (Jason, 2026-11-21): a login the desk keeps —
 // a bank, a medical portal, a personal account. Scoped exactly
 // like every other record (owner, household, memberIds audience,
