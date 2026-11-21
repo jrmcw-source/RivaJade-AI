@@ -996,6 +996,33 @@ export interface FamilyPerson {
   guardianIds?: string[];
   guardianshipDocId?: string;
   delegateToHead?: boolean;
+  // The two court doors out of being decided for (Jason,
+  // 2026-11-21): a judge's emancipation makes a minor their own
+  // decider before 18; a court's incapacity ruling puts an
+  // adult's decisions in their guardians' hands. Both are
+  // accepted the same way — with the document in the record.
+  emancipatedDocId?: string;
+  incapacityDocId?: string;
+}
+
+// Who decides for a person who does not decide for themselves
+// (Jason, 2026-11-21): an emancipated minor decides for
+// themselves; a person under a court's incapacity ruling is
+// decided for by their guardians; a child by their parents and
+// any guardians standing in the parents' place. The child has
+// no override of their own — emancipation by a judge, or the
+// legal age of 18, are the only doors.
+export function personDeciderIds(family: Family, person: FamilyPerson): string[] {
+  if (person.emancipatedDocId) {
+    return person.userId ? [person.userId] : [];
+  }
+  if (person.incapacityDocId) {
+    return [...(person.guardianIds || [])];
+  }
+  if (personIsMinor(family, person)) {
+    return childDeciderIds(person);
+  }
+  return [];
 }
 
 // Everyone who decides for this person: their parents first,
@@ -1009,6 +1036,7 @@ export function childDeciderIds(person: FamilyPerson): string[] {
 // in the stream by a responsibility standing of 'yes'. No birth
 // record, no minority the desk can claim.
 export function personIsMinor(family: Family, person: FamilyPerson): boolean {
+  if (person.emancipatedDocId) return false;
   if (person.responsibility === 'yes') return false;
   const age = person.responsibleAge || familyResponsibleAge(family);
   const now = new Date();

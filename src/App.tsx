@@ -73,6 +73,7 @@ import {
   circleHeadIds,
   childDeciderIds,
   personIsMinor,
+  personDeciderIds,
   upcomingOccasions,
   computeStreamLists,
   effectiveRecordKind,
@@ -405,7 +406,14 @@ function MainApp() {
   const [childEdits, setChildEdits] = useState<
     Record<
       string,
-      { parentIds: string[]; guardianIds: string[]; guardianshipDocId: string; delegateToHead: boolean }
+      {
+        parentIds: string[];
+        guardianIds: string[];
+        guardianshipDocId: string;
+        delegateToHead: boolean;
+        emancipatedDocId: string;
+        incapacityDocId: string;
+      }
     >
   >({});
   const [childFeedback, setChildFeedback] = useState('');
@@ -1244,7 +1252,7 @@ function MainApp() {
     () =>
       families.flatMap((fam) =>
         (fam.people || [])
-          .filter((person) => personIsMinor(fam, person))
+          .filter((person) => personIsMinor(fam, person) || Boolean(person.incapacityDocId))
           .map((person) => ({
             key: `${fam.id}::${person.name}`,
             label: `${person.name} (${fam.name})`,
@@ -1361,7 +1369,7 @@ function MainApp() {
     if (subj.subjectName && subj.subjectFamilyId) {
       const fam = families.find((f) => f.id === subj.subjectFamilyId);
       const person = (fam?.people || []).find((pp) => pp.name === subj.subjectName);
-      if (person && childDeciderIds(person).includes(user.uid)) return true;
+      if (fam && person && personDeciderIds(fam, person).includes(user.uid)) return true;
     }
     const ids = rec.circleIds || [];
     if (ids.length === 0) return true;
@@ -3910,7 +3918,7 @@ function MainApp() {
     const out: Array<{ key: string; family: Family; person: FamilyPerson }> = [];
     for (const fam of families) {
       for (const person of fam.people || []) {
-        if (personIsMinor(fam, person) && childDeciderIds(person).includes(user.uid)) {
+        if (personDeciderIds(fam, person).includes(user.uid)) {
           out.push({ key: `${fam.id}::${person.name}`, family: fam, person });
         }
       }
@@ -3927,6 +3935,8 @@ function MainApp() {
         guardianIds: person.guardianIds || [],
         guardianshipDocId: person.guardianshipDocId || '',
         delegateToHead: person.delegateToHead === true,
+        emancipatedDocId: person.emancipatedDocId || '',
+        incapacityDocId: person.incapacityDocId || '',
       }
     );
   }
@@ -3936,6 +3946,8 @@ function MainApp() {
     guardianIds: string[];
     guardianshipDocId: string;
     delegateToHead: boolean;
+    emancipatedDocId: string;
+    incapacityDocId: string;
   }>) {
     const key = `${family.id}::${person.name}`;
     setChildEdits((prev) => ({
@@ -3955,6 +3967,8 @@ function MainApp() {
         guardianIds: edit.guardianIds,
         guardianshipDocId: edit.guardianshipDocId,
         delegateToHead: edit.delegateToHead,
+        emancipatedDocId: edit.emancipatedDocId,
+        incapacityDocId: edit.incapacityDocId,
       };
     });
     try {
@@ -4011,7 +4025,7 @@ function MainApp() {
         ? {
             subjectName: subject.person.name,
             subjectFamilyId: subject.family.id,
-            decidedByIds: childDeciderIds(subject.person),
+            decidedByIds: personDeciderIds(subject.family, subject.person),
           }
         : { subjectName: '', subjectFamilyId: '', decidedByIds: [] }),
       forName,
@@ -7392,7 +7406,8 @@ function MainApp() {
                       <option value="">Me</option>
                       {myDeciderChildren().map((c) => (
                         <option key={c.key} value={c.key}>
-                          {c.person.name} — my child
+                          {c.person.name}
+                          {personIsMinor(c.family, c.person) ? ' — my child' : ' — in my legal care'}
                         </option>
                       ))}
                     </select>
@@ -7574,7 +7589,11 @@ function MainApp() {
                 place, with the judge's document filed on the desk as the proof. The
                 switch at the bottom of each child's row is the compromise, and it
                 belongs to the parents: leave it off and the parents decide alone; turn
-                it on and they share those decisions upward with the head.
+                it on and they share those decisions upward with the head. A child has
+                no override of their own: a judge's emancipation, or turning 18, are the
+                only doors out of being decided for. The same court paper governs an
+                adult ruled incapable — their guardians decide, with the document on
+                file in the legal-care rows below.
               </p>
               {families.map((fam) => {
                 const minors = (fam.people || []).filter((person) => personIsMinor(fam, person));
@@ -7661,6 +7680,26 @@ function MainApp() {
                               ))}
                             </select>
                           </label>
+                          <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                            <span>Emancipation document:</span>
+                            <select
+                              value={edit.emancipatedDocId}
+                              onChange={(e) =>
+                                setChildEdit(fam, person, { emancipatedDocId: e.target.value })
+                              }
+                              className="min-h-[32px] px-2 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                            >
+                              <option value="">None filed</option>
+                              {documents.map((d) => (
+                                <option key={d.id} value={d.id}>
+                                  {d.title}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="text-[11px] text-slate-400">
+                              A judge's emancipation makes them their own decider.
+                            </span>
+                          </label>
                           <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400">
                             <input
                               type="checkbox"
@@ -7678,6 +7717,70 @@ function MainApp() {
                         </div>
                       );
                     })}
+                    {(fam.people || []).filter((person) => !personIsMinor(fam, person)).length > 0 && (
+                      <div className="space-y-2 pt-1">
+                        <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                          In someone's legal care — a court's incapacity ruling puts the
+                          decisions in the guardians' hands, with the document on file:
+                        </p>
+                        {(fam.people || [])
+                          .filter((person) => !personIsMinor(fam, person))
+                          .map((person) => {
+                            const edit = childEditFor(fam, person);
+                            return (
+                              <div
+                                key={`care-${person.name}`}
+                                className="px-3 py-2 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 rounded-lg space-y-1.5"
+                              >
+                                <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                                  {person.name}
+                                </p>
+                                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                                  <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                                    Guardians:
+                                  </span>
+                                  {candidates.map((cand) => (
+                                    <label
+                                      key={`care-g-${cand.userId}`}
+                                      className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={edit.guardianIds.includes(cand.userId || '')}
+                                        onChange={() => {
+                                          const uid = cand.userId || '';
+                                          const next = edit.guardianIds.includes(uid)
+                                            ? edit.guardianIds.filter((x) => x !== uid)
+                                            : [...edit.guardianIds, uid];
+                                          setChildEdit(fam, person, { guardianIds: next });
+                                        }}
+                                      />
+                                      {cand.name}
+                                    </label>
+                                  ))}
+                                </div>
+                                <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                                  <span>Incapacity document:</span>
+                                  <select
+                                    value={edit.incapacityDocId}
+                                    onChange={(e) =>
+                                      setChildEdit(fam, person, { incapacityDocId: e.target.value })
+                                    }
+                                    className="min-h-[32px] px-2 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                                  >
+                                    <option value="">None filed</option>
+                                    {documents.map((d) => (
+                                      <option key={d.id} value={d.id}>
+                                        {d.title}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    )}
                     <button
                       type="button"
                       onClick={() => void handleSaveChildDeciders(fam)}
