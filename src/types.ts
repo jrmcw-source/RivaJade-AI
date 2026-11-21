@@ -375,6 +375,12 @@ export interface UserProfile {
   aiAccess?: boolean;
   aiConnectors?: boolean;
   aiWrite?: boolean;
+  // The agreement (Jason, 2026-11-21): the EULA is accepted
+  // before the desk opens, and the acceptance is recorded with
+  // its version and date. The disclaimer itself lives once, on
+  // the About page — not repeated across the desk.
+  eulaVersion?: string;
+  eulaAcceptedAtIso?: string;
   sealedKinds?: RecordKind[];
   createdAt?: unknown;
   updatedAt?: unknown;
@@ -1494,3 +1500,8 @@ export interface DeskPing {
   createdAt?: unknown;
   updatedAt?: unknown;
 }
+
+
+// Bump when the agreement's words change in substance; the
+// desk asks again at the new version.
+export const EULA_VERSION = '2026-11-21';

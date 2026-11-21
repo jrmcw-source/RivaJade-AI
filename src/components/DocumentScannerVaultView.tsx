@@ -547,8 +547,7 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
             </p>
           )}
           <p style={{ fontSize: '12px', marginTop: '16px' }}>
-            Kept by the family in Steward. Steward is an aid, not a legal verdict or
-            a medical diagnostic.
+            Kept by the family in Steward.
           </p>
         </div>
       )}

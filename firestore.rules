@@ -264,6 +264,8 @@ service cloud.firestore {
           'aiConnectors',
           'aiWrite',
           'sealedKinds',
+          'eulaVersion',
+          'eulaAcceptedAtIso',
           'createdAt',
           'updatedAt'
         ])
@@ -304,6 +306,8 @@ service cloud.firestore {
         && (!('aiAccess' in data) || data.aiAccess is bool)
         && (!('aiConnectors' in data) || data.aiConnectors is bool)
         && (!('aiWrite' in data) || data.aiWrite is bool)
+        && (!('eulaVersion' in data) || (data.eulaVersion is string && data.eulaVersion.size() <= 40))
+        && (!('eulaAcceptedAtIso' in data) || (data.eulaAcceptedAtIso is string && data.eulaAcceptedAtIso.size() <= 40))
         && (!('sealedKinds' in data) || isBoundedStringList(data.sealedKinds, 6, 20));
     }
 
@@ -1648,6 +1652,8 @@ function isValidGiveProposal(data) {
           'preferredFocusWindow',
           'prefersQuickWinsFirst',
           'behaviorSignals',
+          'eulaVersion',
+          'eulaAcceptedAtIso',
           'updatedAt'
         ]);
       allow delete: if isVerifiedOwner(userId) && isValidId(userId);

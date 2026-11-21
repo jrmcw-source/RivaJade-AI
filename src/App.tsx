@@ -97,6 +97,7 @@ import {
   EmergencySheet,
   SharedList,
   DeskPing,
+  EULA_VERSION,
   FamilyStorage,
   ProjectInvite,
   ProjectMember,
@@ -121,6 +122,7 @@ import { WimberleyPropertyView } from './components/WimberleyPropertyView';
 import { FinancesView } from './components/FinancesView';
 import { GoogleDriveBackupModal } from './components/GoogleDriveBackupModal';
 import { AIAssistantDrawer } from './components/AIAssistantDrawer';
+import { AboutView } from './components/AboutView';
 import { FrontDoorView, FrontDoorDeskId } from './components/FrontDoorView';
 import { TreeView } from './components/TreeView';
 import {
@@ -4465,6 +4467,24 @@ function MainApp() {
     }
   }
 
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const eulaNeeded = Boolean(
+    user && userProfile && userProfile.eulaVersion !== EULA_VERSION
+  );
+
+  async function handleAcceptEula() {
+    if (!db || !user) return;
+    try {
+      await updateDoc(doc(db, 'users', user.uid), {
+        eulaVersion: EULA_VERSION,
+        eulaAcceptedAtIso: new Date().toISOString(),
+        updatedAt: serverTimestamp(),
+      });
+    } catch {
+      // The gate stays up until the acceptance is recorded.
+    }
+  }
+
   async function handleSaveEmergencySheet() {
     if (!user) return;
     const forName = sheetForName.trim();
@@ -7888,8 +7908,8 @@ function MainApp() {
                 One sheet per person, in your own words, for the day somebody needs it
                 fast: who to call, who your doctors are, what the people helping you
                 should know. You choose how far it reaches, like everything else on the
-                desk. The desk holds the sheet exactly as you wrote it — it does not
-                give medical advice, and it never changes a word.
+                desk. The desk holds the sheet exactly as you wrote it — it never
+                changes a word.
               </p>
               <div className="space-y-2">
                 {myDeciderChildren().length > 0 && (
@@ -8257,6 +8277,23 @@ function MainApp() {
 
             <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                About Steward
+              </h3>
+              <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                What this desk is, what it is not, and the agreement every person
+                accepts before it opens.
+              </p>
+              <button
+                type="button"
+                onClick={() => setAboutOpen(true)}
+                className="min-h-[36px] px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-md text-slate-700 dark:text-slate-200"
+              >
+                Read the About page
+              </button>
+            </div>
+
+            <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
                 Reach out
               </h3>
               <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
@@ -8360,10 +8397,7 @@ function MainApp() {
                 no override of their own: a judge's emancipation, or turning 18, are the
                 only doors out of being decided for. The same court paper governs an
                 adult ruled incapable — their guardians decide, with the document on
-                file in the legal-care rows below. Steward is an aid, not a legal
-                verdict or a medical diagnostic — for those, get your own doctor and
-                a lawyer. The court's documents are the authority; the desk follows
-                them.
+                file in the legal-care rows below.
               </p>
               {families.map((fam) => {
                 const minors = (fam.people || []).filter((person) => personIsMinor(fam, person));
@@ -9961,6 +9995,18 @@ function MainApp() {
       />
 
       {/* Cross-App AI Assistant Slide-Over Drawer */}
+      {aboutOpen && (
+        <AboutView mode="about" onClose={() => setAboutOpen(false)} />
+      )}
+      {eulaNeeded && (
+        <AboutView
+          mode="eula"
+          onClose={() => undefined}
+          onAccept={() => void handleAcceptEula()}
+          onDecline={() => void signOutUser()}
+        />
+      )}
+
       {printJob && (
         <div className="steward-print">
           {printJob.type === 'sheet' && (
@@ -9969,8 +10015,7 @@ function MainApp() {
                 Emergency sheet — {printJob.sheet.forName}
               </h1>
               <p style={{ fontSize: '12px', marginBottom: '16px' }}>
-                Kept by the family in Steward. Steward is an aid, not a legal verdict
-                or a medical diagnostic — for those, get your own doctor and a lawyer.
+                Kept by the family in Steward.
               </p>
               {(
                 [
