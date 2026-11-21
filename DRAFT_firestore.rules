@@ -1138,6 +1138,7 @@ service cloud.firestore {
           'childWriterIds',
           'recovery',
           'storage',
+          'restoreDirective',
           'createdAt',
           'updatedAt'
         ])
@@ -1163,6 +1164,7 @@ service cloud.firestore {
           && data.recovery.wraps is map && data.recovery.wraps.size() <= 100
           && (!('headKeyWrap' in data.recovery) || (data.recovery.headKeyWrap is string && data.recovery.headKeyWrap.size() <= 400))))
         && (!('storage' in data) || (data.storage is map && data.storage.keys().hasOnly(['rootChoice', 'rootId', 'rootLabel', 'backupsEnabled', 'backupFrequency', 'backupScope'])))
+        && (!('restoreDirective' in data) || (data.restoreDirective is map && data.restoreDirective.keys().hasOnly(['snapshotExportedAtIso', 'atIso', 'byName'])))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -1398,6 +1400,7 @@ service cloud.firestore {
           'omitViewIds',
           'omitWriteIds',
           'omitKinds',
+          'restoreDirective',
           'createdAt',
           'updatedAt'
         ])
@@ -1416,6 +1419,7 @@ service cloud.firestore {
         && (!('omitViewIds' in data) || isBoundedStringList(data.omitViewIds, 50, 128))
         && (!('omitWriteIds' in data) || isBoundedStringList(data.omitWriteIds, 50, 128))
         && (!('omitKinds' in data) || isBoundedStringList(data.omitKinds, 5, 20))
+        && (!('restoreDirective' in data) || (data.restoreDirective is map && data.restoreDirective.keys().hasOnly(['snapshotExportedAtIso', 'atIso', 'byName'])))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -2151,7 +2155,7 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && existing().ownerId == request.auth.uid
-        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'memberIds', 'people', 'headMode', 'headNames', 'responsibleAge', 'notYetIds', 'childWriterIds', 'recovery', 'storage', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'memberIds', 'people', 'headMode', 'headNames', 'responsibleAge', 'notYetIds', 'childWriterIds', 'recovery', 'storage', 'restoreDirective', 'updatedAt']);
       allow update: if isVerifiedUser()
         && isValidId(familyId)
         && isValidFamily(incoming())
@@ -2159,7 +2163,7 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && request.auth.uid in existing().memberIds
-        && incoming().diff(existing()).affectedKeys().hasOnly(['recovery', 'storage', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['recovery', 'storage', 'restoreDirective', 'updatedAt']);
       allow delete: if isVerifiedUser() && isValidId(familyId) && existing().ownerId == request.auth.uid;
     }
 
@@ -2240,7 +2244,7 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && ((existing().ownerId == request.auth.uid
-              && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'memberIds', 'temporary', 'expiresAtKey', 'headMode', 'headIds', 'omitViewIds', 'omitWriteIds', 'omitKinds', 'updatedAt']))
+              && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'memberIds', 'temporary', 'expiresAtKey', 'headMode', 'headIds', 'omitViewIds', 'omitWriteIds', 'omitKinds', 'restoreDirective', 'updatedAt']))
             || (existing().get('headMode', 'seniority') == 'chosen'
               && request.auth.uid in existing().get('headIds', [])
               && incoming().diff(existing()).affectedKeys().hasOnly(['omitViewIds', 'omitWriteIds', 'omitKinds', 'updatedAt'])));

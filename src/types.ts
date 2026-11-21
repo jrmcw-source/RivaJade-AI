@@ -635,6 +635,12 @@ export interface HouseholdMember {
 // above the households; households link to it, and family-scoped
 // records carry the family roster as their audience. People can be
 // family before they run a household of their own.
+export interface RestoreDirective {
+  snapshotExportedAtIso: string;
+  atIso: string;
+  byName: string;
+}
+
 export interface FamilyStorage {
   rootChoice?: 'default' | 'custom';
   rootId?: string;
@@ -692,6 +698,15 @@ export interface Family {
   // what that splits. Backups are the head's toggle: whether they
   // run, how often, and what they carry.
   storage?: FamilyStorage;
+  // The head-head's restore directive (Jason, 2026-11-21): when
+  // the head of the whole family restores, the restore reaches
+  // everything underneath her tier — no sub-head's setting or
+  // wish blocks it. Her restore writes this directive; members'
+  // devices surface it and restore their own records from the
+  // same backup. The family's remedy for a head it disagrees
+  // with is to evict the head and take over — the desk does not
+  // second-guess her.
+  restoreDirective?: RestoreDirective;
   // The counted people (Jason, 2026-11-20): the family roster holds
   // people, not just accounts — cousins who never open the app are
   // family too. Headship of the giant circle descends by seniority
@@ -987,6 +1002,10 @@ export interface Circle {
   omitKinds?: string[];
   createdAt?: unknown;
   updatedAt?: unknown;
+  // The head's restore directive — same law as the family's
+  // (Jason, 2026-11-21): a head's restore reaches every member
+  // of the circle, across all circles, however they fit.
+  restoreDirective?: RestoreDirective;
 }
 
 // Who heads a circle, as user ids: the chosen head(s) when the

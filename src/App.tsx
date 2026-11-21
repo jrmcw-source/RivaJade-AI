@@ -387,6 +387,7 @@ function MainApp() {
   const [stFrequency, setStFrequency] = useState<'daily' | 'weekly' | 'manual'>('daily');
   const [stScope, setStScope] = useState<'everything' | 'finances-official' | 'documents'>('everything');
   const [stFeedback, setStFeedback] = useState('');
+  const [restoreNoticeTick, setRestoreNoticeTick] = useState(0);
   const [sharedAccountRecords, setSharedAccountRecords] = useState<AccountRecord[]>([]);
   const [acctTitle, setAcctTitle] = useState('');
   const [acctUsername, setAcctUsername] = useState('');
@@ -5272,6 +5273,51 @@ function MainApp() {
       }
     }
 
+    // The head-head's restore reaches the whole tier (Jason,
+    // 2026-11-21): if the restorer heads a family, the restore
+    // writes its directive there, and the members' devices will
+    // restore their own records from this same backup. No
+    // sub-head's setting blocks it.
+    if (user) {
+      const headed = families.filter(
+        (f) => f.ownerId === user.uid || familyHeadUid(f) === user.uid
+      );
+      const directive = {
+        snapshotExportedAtIso: String(snapshot.exportedAtIso || ''),
+        atIso: new Date().toISOString(),
+        byName: userProfile?.displayName || user.displayName || 'The family head',
+      };
+      for (const fam of headed) {
+        try {
+          await updateDoc(doc(db, 'families', fam.id), {
+            restoreDirective: directive,
+            updatedAt: serverTimestamp(),
+          });
+        } catch {
+          // The restore itself already landed; a directive that
+          // fails to write is retried by the next restore.
+        }
+      }
+      // Of all circles, however they fit (Jason, 2026-11-21):
+      // the same directive lands on every circle the restorer
+      // heads, and its members restore their own records from
+      // the same backup.
+      const headedCircles = circles.filter(
+        (c) => c.ownerId === user.uid || circleHeadIds(c).includes(user.uid)
+      );
+      for (const circle of headedCircles) {
+        try {
+          await updateDoc(doc(db, 'circles', circle.id), {
+            restoreDirective: directive,
+            updatedAt: serverTimestamp(),
+          });
+        } catch {
+          // Same as above — the restore landed; the directive
+          // is retried by the next one.
+        }
+      }
+    }
+
     return { importedCount };
   }
 
@@ -7019,6 +7065,85 @@ function MainApp() {
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
                 Storage & backups
               </h3>
+              {families
+                .filter(
+                  (f) =>
+                    user &&
+                    f.ownerId !== user.uid &&
+                    familyHeadUid(f) !== user.uid &&
+                    f.restoreDirective &&
+                    localStorage.getItem(`steward-restore-seen-${f.id}`) !== f.restoreDirective.atIso
+                )
+                .map((f) => (
+                  <div
+                    key={`${f.id}-${restoreNoticeTick}`}
+                    className="px-3 py-2 bg-teal-50 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800 rounded-lg space-y-1.5"
+                  >
+                    <p className="text-xs text-slate-700 dark:text-slate-200">
+                      {f.restoreDirective?.byName} restored the whole family's desk from the
+                      backup of{' '}
+                      {f.restoreDirective?.snapshotExportedAtIso
+                        ? new Date(f.restoreDirective.snapshotExportedAtIso).toLocaleDateString()
+                        : 'the family backup'}
+                      . Open Backups and restore that same backup to bring your own records
+                      back — the head's restore covers everything under her tier, and your
+                      own records come back under your own sign-in.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        localStorage.setItem(
+                          `steward-restore-seen-${f.id}`,
+                          f.restoreDirective?.atIso || ''
+                        );
+                        setRestoreNoticeTick((t) => t + 1);
+                      }}
+                      className="min-h-[30px] px-2.5 text-[11px] font-medium text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 hover:bg-teal-100 dark:hover:bg-teal-950/50 rounded-md"
+                    >
+                      Mark done
+                    </button>
+                  </div>
+                ))}
+              {circles
+                .filter(
+                  (c) =>
+                    user &&
+                    c.ownerId !== user.uid &&
+                    !circleHeadIds(c).includes(user.uid) &&
+                    c.memberIds.includes(user.uid) &&
+                    c.restoreDirective &&
+                    localStorage.getItem(`steward-restore-seen-${c.id}`) !== c.restoreDirective.atIso
+                )
+                .map((c) => (
+                  <div
+                    key={`${c.id}-${restoreNoticeTick}`}
+                    className="px-3 py-2 bg-teal-50 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800 rounded-lg space-y-1.5"
+                  >
+                    <p className="text-xs text-slate-700 dark:text-slate-200">
+                      {c.restoreDirective?.byName} restored the {c.name} circle's desk from
+                      the backup of{' '}
+                      {c.restoreDirective?.snapshotExportedAtIso
+                        ? new Date(c.restoreDirective.snapshotExportedAtIso).toLocaleDateString()
+                        : 'the family backup'}
+                      . Open Backups and restore that same backup to bring your own records
+                      back — a head's restore covers the whole circle, and your own records
+                      come back under your own sign-in.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        localStorage.setItem(
+                          `steward-restore-seen-${c.id}`,
+                          c.restoreDirective?.atIso || ''
+                        );
+                        setRestoreNoticeTick((t) => t + 1);
+                      }}
+                      className="min-h-[30px] px-2.5 text-[11px] font-medium text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 hover:bg-teal-100 dark:hover:bg-teal-950/50 rounded-md"
+                    >
+                      Mark done
+                    </button>
+                  </div>
+                ))}
               <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
                 The family head chooses where this family's records are stored. The desk's
                 own answer — and the common, safe one — is one host root folder: the
