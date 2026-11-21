@@ -1,5 +1,5 @@
 import React from 'react';
-import { Family, Household, Circle, familyHeadName, circleHeadIds } from '../types';
+import { Family, Household, Circle, familyHeadName, circleHeadIds, jurisdictionLine } from '../types';
 
 // The Tree (Jason, 2026-11-20): one page showing the whole setup —
 // the ground and the people. The place tree is the family's ground:
@@ -84,6 +84,9 @@ export const TreeView: React.FC<TreeViewProps> = ({
                     {place.name}
                     <span className={small}> — {place.note}</span>
                   </p>
+                  {jurisdictionLine(place.name) && (
+                    <p className={small}>Law over it: {jurisdictionLine(place.name)}</p>
+                  )}
                   {(place.children || []).map((sub) => (
                     <p key={sub.name} className="text-xs text-slate-600 dark:text-slate-400 ml-2">
                       {sub.name} — {sub.note}

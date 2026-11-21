@@ -69,6 +69,61 @@ export function placeMatches(recordPlace: string, filter: string): boolean {
   return (PLACE_CHILDREN[filter] || []).includes(recordPlace);
 }
 
+// The law stack over each place (Jason, 2026-11-21): every household,
+// by its physical legal address, answers upward — city if it sits in
+// one, then county or regional regulation, then state, then federal.
+// The model is country-general on purpose: Dan owns two properties
+// outright in the Philippines and may join, and the desk is built to
+// be sellable world-wide if it is built right. A sub-branch inherits
+// its parent place's stack.
+export interface JurisdictionStack {
+  city: string | null; // null = outside any city's limits
+  county: string; // county, parish, or the regional equivalent
+  state: string; // state or province
+  country: string; // the top of the stack
+  note?: string;
+}
+
+export const PLACE_JURISDICTIONS: Record<string, JurisdictionStack> = {
+  'Riva Jade': {
+    city: null,
+    county: 'Hays County',
+    state: 'Texas',
+    country: 'United States',
+    note: 'The whole property, every sublevel included, rides completely outside Wimberley city limits.',
+  },
+  Oakleaf: {
+    city: 'Lafayette',
+    county: 'Lafayette Parish',
+    state: 'Louisiana',
+    country: 'United States',
+  },
+  'Elephant Walk': {
+    city: 'Carencro',
+    county: 'Lafayette Parish',
+    state: 'Louisiana',
+    country: 'United States',
+    note: 'Carencro as Jason places it — the legal lines govern if they say otherwise.',
+  },
+};
+
+export function jurisdictionFor(place: string): JurisdictionStack | null {
+  if (PLACE_JURISDICTIONS[place]) return PLACE_JURISDICTIONS[place];
+  for (const parent of Object.keys(PLACE_JURISDICTIONS)) {
+    if (place.startsWith(`${parent} — `)) return PLACE_JURISDICTIONS[parent];
+  }
+  if (place === 'Homestead' || place === 'Rental Cabin' || place === 'Wildlife Conservancy') {
+    return PLACE_JURISDICTIONS['Riva Jade'];
+  }
+  return null;
+}
+
+export function jurisdictionLine(place: string): string {
+  const j = jurisdictionFor(place);
+  if (!j) return '';
+  return `${j.city ? j.city : 'Outside city limits'} · ${j.county} · ${j.state} · ${j.country}`;
+}
+
 // The family's retention rule (Jason, 2026-11-17): everything is kept
 // forever, but the ACTIVE working period for a finance record is the
 // legal minimum its branch answers to — the standard reach of the
