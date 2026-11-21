@@ -704,6 +704,11 @@ export interface Family {
   // what that splits. Backups are the head's toggle: whether they
   // run, how often, and what they carry.
   storage?: FamilyStorage;
+  // Reach-out pings (Jason, 2026-11-21): a family may turn on
+  // short in-desk pings between its members. Absent = OFF — the
+  // desk does not ping on a clock, and a family turns this on
+  // for itself, in its own settings.
+  pingsEnabled?: boolean;
   // The head-head's restore directive (Jason, 2026-11-21): when
   // the head of the whole family restores, the restore reaches
   // everything underneath her tier — no sub-head's setting or
@@ -1467,6 +1472,25 @@ export interface SharedList {
   circleIds?: string[];
   title: string;
   items: SharedListItem[];
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+
+// A reach-out ping: one member's short note to another, waiting
+// on the recipient's front door until they mark it seen. It
+// carries no record with it — it points at the desk, the way a
+// knock points at a door.
+export interface DeskPing {
+  id: string;
+  familyId: string;
+  familyName: string;
+  fromUid: string;
+  fromName: string;
+  toUid: string;
+  toName: string;
+  message: string;
+  status: 'waiting' | 'seen';
   createdAt?: unknown;
   updatedAt?: unknown;
 }

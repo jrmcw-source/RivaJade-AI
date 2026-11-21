@@ -1147,6 +1147,7 @@ service cloud.firestore {
           'recovery',
           'storage',
           'restoreDirective',
+          'pingsEnabled',
           'createdAt',
           'updatedAt'
         ])
@@ -1173,6 +1174,7 @@ service cloud.firestore {
           && (!('headKeyWrap' in data.recovery) || (data.recovery.headKeyWrap is string && data.recovery.headKeyWrap.size() <= 400))))
         && (!('storage' in data) || (data.storage is map && data.storage.keys().hasOnly(['rootChoice', 'rootId', 'rootLabel', 'backupsEnabled', 'backupFrequency', 'backupScope'])))
         && (!('restoreDirective' in data) || (data.restoreDirective is map && data.restoreDirective.keys().hasOnly(['snapshotExportedAtIso', 'atIso', 'byName'])))
+    && (!('pingsEnabled' in data) || data.pingsEnabled is bool)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -1397,7 +1399,20 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
-    function isValidSharedList(data) {
+    function isValidPing(data) {
+  return data.keys().hasAll(['familyId', 'familyName', 'fromUid', 'fromName', 'toUid', 'toName', 'message', 'status', 'createdAt', 'updatedAt'])
+    && data.keys().hasOnly(['familyId', 'familyName', 'fromUid', 'fromName', 'toUid', 'toName', 'message', 'status', 'createdAt', 'updatedAt'])
+    && data.familyId is string && data.familyId.size() > 0 && data.familyId.size() <= 128
+    && data.familyName is string && data.familyName.size() <= 200
+    && data.fromUid is string && data.fromUid.size() > 0 && data.fromUid.size() <= 128
+    && data.fromName is string && data.fromName.size() <= 200
+    && data.toUid is string && data.toUid.size() > 0 && data.toUid.size() <= 128
+    && data.toName is string && data.toName.size() <= 200
+    && data.message is string && data.message.size() > 0 && data.message.size() <= 300
+    && (data.status == 'waiting' || data.status == 'seen');
+}
+
+function isValidSharedList(data) {
   return data.keys().hasAll(['userId', 'householdId', 'memberIds', 'title', 'items', 'createdAt', 'updatedAt'])
     && data.keys().hasOnly(['userId', 'householdId', 'memberIds', 'scope', 'familyId', 'circleIds', 'title', 'items', 'createdAt', 'updatedAt'])
     && data.userId is string && data.userId.size() > 0 && data.userId.size() <= 128
@@ -2017,6 +2032,38 @@ function isValidGiveProposal(data) {
         && existing().userId == request.auth.uid;
     }
 
+    match /pings/{pingId} {
+      // A reach-out exists only where the family turned pings
+      // on — the create rule reads the family's own switch.
+      // Both parties must be members of that family.
+      allow get: if isSignedIn() && isValidId(pingId)
+        && (existing().toUid == request.auth.uid
+          || existing().fromUid == request.auth.uid);
+      allow list: if isSignedIn()
+        && (resource.data.toUid == request.auth.uid
+          || resource.data.fromUid == request.auth.uid);
+      allow create: if isVerifiedUser()
+        && isValidId(pingId)
+        && isValidPing(incoming())
+        && incoming().fromUid == request.auth.uid
+        && incoming().status == 'waiting'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && familyData(incoming().familyId).get('pingsEnabled', false) == true
+        && request.auth.uid in familyData(incoming().familyId).get('memberIds', [])
+        && incoming().toUid in familyData(incoming().familyId).get('memberIds', []);
+      allow update: if isVerifiedUser()
+        && isValidId(pingId)
+        && isValidPing(incoming())
+        && existing().toUid == request.auth.uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+      allow delete: if isVerifiedUser() && isValidId(pingId)
+        && (existing().toUid == request.auth.uid
+          || existing().fromUid == request.auth.uid);
+    }
+
     match /sharedLists/{listId} {
       // One list at a reach, like every other record. The owner
       // keeps it; anyone in the audience can check an item off —
@@ -2404,7 +2451,7 @@ function isValidGiveProposal(data) {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && existing().ownerId == request.auth.uid
-        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'memberIds', 'people', 'headMode', 'headNames', 'responsibleAge', 'notYetIds', 'childWriterIds', 'recovery', 'storage', 'restoreDirective', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'memberIds', 'people', 'headMode', 'headNames', 'responsibleAge', 'notYetIds', 'childWriterIds', 'recovery', 'storage', 'restoreDirective', 'pingsEnabled', 'updatedAt']);
       allow update: if isVerifiedUser()
         && isValidId(familyId)
         && isValidFamily(incoming())
@@ -2412,7 +2459,7 @@ function isValidGiveProposal(data) {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && request.auth.uid in existing().memberIds
-        && incoming().diff(existing()).affectedKeys().hasOnly(['recovery', 'storage', 'restoreDirective', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['recovery', 'storage', 'restoreDirective', 'pingsEnabled', 'updatedAt']);
       allow delete: if isVerifiedUser() && isValidId(familyId) && existing().ownerId == request.auth.uid;
     }
 

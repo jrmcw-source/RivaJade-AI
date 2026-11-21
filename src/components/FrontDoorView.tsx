@@ -30,6 +30,7 @@ import {
   PropertyEntryArea,
   PropertyEntryStatus,
   ScannedDocument,
+  DeskPing,
   ScheduleTask,
   TaskPriority,
   TaskType,
@@ -93,6 +94,8 @@ interface FrontDoorViewProps {
   propertyEntries: PropertyEntry[];
   financeEntries: FinanceEntry[];
   documents: ScannedDocument[];
+  pings?: DeskPing[];
+  onMarkPingSeen?: (ping: DeskPing) => void;
   driveConnected: boolean;
   aiAccess?: boolean;
   aiWrite?: boolean;
@@ -246,6 +249,8 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
     propertyEntries,
     financeEntries,
     documents,
+    pings,
+    onMarkPingSeen,
     driveConnected,
     aiAccess,
     aiWrite,
@@ -1326,6 +1331,30 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
 
   const conversation = (
     <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
+      {(pings || []).length > 0 && (
+        <div className="space-y-2">
+          {(pings || []).map((ping) => (
+            <div
+              key={ping.id}
+              className="w-full px-5 py-4 rounded-2xl bg-teal-50 dark:bg-teal-950/40 border border-teal-200 dark:border-teal-900 text-slate-900 dark:text-slate-100"
+            >
+              <p className="text-sm font-medium">
+                {ping.fromName} reached out ({ping.familyName}):
+              </p>
+              <p className="text-base leading-relaxed mt-1">{ping.message}</p>
+              {onMarkPingSeen && (
+                <button
+                  type="button"
+                  onClick={() => onMarkPingSeen(ping)}
+                  className="mt-2 min-h-[36px] px-3 text-xs bg-teal-700 hover:bg-teal-600 text-white rounded-md"
+                >
+                  Seen
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       {messages.map((msg) => (
         <div
           key={msg.id}

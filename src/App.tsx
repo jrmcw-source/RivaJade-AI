@@ -96,6 +96,7 @@ import {
   DirectoryEntry,
   EmergencySheet,
   SharedList,
+  DeskPing,
   FamilyStorage,
   ProjectInvite,
   ProjectMember,
@@ -374,6 +375,8 @@ function MainApp() {
   const [sharedEmergencySheets, setSharedEmergencySheets] = useState<EmergencySheet[]>([]);
   const [deciderEmergencySheets, setDeciderEmergencySheets] = useState<EmergencySheet[]>([]);
   const [ownLists, setOwnLists] = useState<SharedList[]>([]);
+  const [pingsToMe, setPingsToMe] = useState<DeskPing[]>([]);
+  const [pingsFromMe, setPingsFromMe] = useState<DeskPing[]>([]);
   const [sharedListsIn, setSharedListsIn] = useState<SharedList[]>([]);
   const [childProposalsAsDecider, setChildProposalsAsDecider] = useState<ChildChangeProposal[]>([]);
   const [childProposalsMine, setChildProposalsMine] = useState<ChildChangeProposal[]>([]);
@@ -1318,6 +1321,43 @@ function MainApp() {
   const sharedLists = useMemo(
     () => mergeRecordsById(ownLists, sharedListsIn),
     [ownLists, sharedListsIn]
+  );
+
+  useEffect(() => {
+    if (!db || !user) {
+      setPingsToMe([]);
+      return;
+    }
+    return onSnapshot(
+      query(collection(db, 'pings'), where('toUid', '==', user.uid)),
+      (snapshot) => {
+        setPingsToMe(
+          snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<DeskPing, 'id'>) }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'pings')
+    );
+  }, [user]);
+
+  useEffect(() => {
+    if (!db || !user) {
+      setPingsFromMe([]);
+      return;
+    }
+    return onSnapshot(
+      query(collection(db, 'pings'), where('fromUid', '==', user.uid)),
+      (snapshot) => {
+        setPingsFromMe(
+          snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<DeskPing, 'id'>) }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'pings')
+    );
+  }, [user]);
+
+  const waitingPings = useMemo(
+    () => pingsToMe.filter((pg) => pg.status === 'waiting'),
+    [pingsToMe]
   );
 
   const propertyEntries = useMemo(
@@ -4361,6 +4401,67 @@ function MainApp() {
       setListFeedback('The list is gone.');
     } catch (err) {
       setListFeedback(err instanceof Error ? err.message : 'That list would not delete.');
+    }
+  }
+
+  const [pingFeedback, setPingFeedback] = useState('');
+  const [pingFamilyId, setPingFamilyId] = useState('');
+  const [pingToUid, setPingToUid] = useState('');
+  const [pingMessage, setPingMessage] = useState('');
+
+  async function handleTogglePings(family: Family, enabled: boolean) {
+    if (!db || !user) return;
+    try {
+      await updateDoc(doc(db, 'families', family.id), {
+        pingsEnabled: enabled,
+        updatedAt: serverTimestamp(),
+      });
+      setPingFeedback(
+        enabled
+          ? `Pings are on for the ${family.name} family — its members can reach out to each other here.`
+          : `Pings are off for the ${family.name} family.`
+      );
+    } catch (err) {
+      setPingFeedback(
+        err instanceof Error ? err.message : 'That switch did not save — the family head keeps it.'
+      );
+    }
+  }
+
+  async function handleSendPing() {
+    if (!db || !user || !pingFamilyId || !pingToUid || !pingMessage.trim()) return;
+    const fam = families.find((f) => f.id === pingFamilyId);
+    if (!fam) return;
+    const target = (fam.people || []).find((person) => person.userId === pingToUid);
+    try {
+      await setDoc(doc(db, 'pings', createSafeId('png')), {
+        familyId: fam.id,
+        familyName: fam.name,
+        fromUid: user.uid,
+        fromName: userProfile?.displayName || user.displayName || 'A family member',
+        toUid: pingToUid,
+        toName: target?.name || 'A family member',
+        message: pingMessage.trim(),
+        status: 'waiting',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setPingMessage('');
+      setPingFeedback(`Sent — it waits on ${target?.name || 'their'} front door.`);
+    } catch (err) {
+      setPingFeedback(err instanceof Error ? err.message : 'That ping did not send.');
+    }
+  }
+
+  async function handleMarkPingSeen(ping: DeskPing) {
+    if (!db || !user) return;
+    try {
+      await updateDoc(doc(db, 'pings', ping.id), {
+        status: 'seen',
+        updatedAt: serverTimestamp(),
+      });
+    } catch {
+      // The ping stays waiting; nothing else depends on the mark.
     }
   }
 
@@ -8156,6 +8257,95 @@ function MainApp() {
 
             <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                Reach out
+              </h3>
+              <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                A short ping between family members, waiting on their front door. It is
+                off unless a family turns it on for itself — the desk does not ping on
+                a clock, and a ping carries no record with it. It is a knock, not a
+                delivery.
+              </p>
+              {families
+                .filter(
+                  (f) => user && (f.ownerId === user.uid || familyHeadUid(f) === user.uid)
+                )
+                .map((f) => (
+                  <label
+                    key={f.id}
+                    className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={f.pingsEnabled === true}
+                      onChange={(e) => void handleTogglePings(f, e.target.checked)}
+                    />
+                    Pings on for the {f.name} family
+                  </label>
+                ))}
+              {families.filter((f) => f.pingsEnabled === true).length > 0 && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={pingFamilyId}
+                    onChange={(e) => {
+                      setPingFamilyId(e.target.value);
+                      setPingToUid('');
+                    }}
+                    className="min-h-[36px] px-2 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                  >
+                    <option value="">Pick a family</option>
+                    {families
+                      .filter((f) => f.pingsEnabled === true)
+                      .map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.name}
+                        </option>
+                      ))}
+                  </select>
+                  <select
+                    value={pingToUid}
+                    onChange={(e) => setPingToUid(e.target.value)}
+                    className="min-h-[36px] px-2 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                  >
+                    <option value="">Reach out to…</option>
+                    {(families.find((f) => f.id === pingFamilyId)?.people || [])
+                      .filter((person) => person.userId && user && person.userId !== user.uid)
+                      .map((person) => (
+                        <option key={person.userId} value={person.userId}>
+                          {person.name}
+                        </option>
+                      ))}
+                  </select>
+                  <input
+                    value={pingMessage}
+                    onChange={(e) => setPingMessage(e.target.value)}
+                    placeholder="A short note — the papers are ready, call when you can…"
+                    className="min-w-[220px] flex-1 px-2.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handleSendPing()}
+                    className="min-h-[36px] px-3 text-xs bg-teal-700 hover:bg-teal-600 text-white rounded-md"
+                  >
+                    Send the ping
+                  </button>
+                </div>
+              )}
+              {pingFeedback && (
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">{pingFeedback}</p>
+              )}
+              {pingsFromMe.filter((pg) => pg.status === 'waiting').length > 0 && (
+                <p className="text-[11px] text-slate-400">
+                  Still waiting to be seen:{' '}
+                  {pingsFromMe
+                    .filter((pg) => pg.status === 'waiting')
+                    .map((pg) => `${pg.toName} (${pg.familyName})`)
+                    .join(', ')}
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
                 Children & parents
               </h3>
               <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
@@ -9857,6 +10047,8 @@ function MainApp() {
           propertyEntries={visiblePropertyEntries}
           financeEntries={visibleFinanceEntries}
           documents={visibleDocuments}
+          pings={waitingPings}
+          onMarkPingSeen={(ping) => void handleMarkPingSeen(ping)}
           driveConnected={driveConnected}
         aiAccess={userProfile?.aiAccess !== false}
         aiWrite={userProfile?.aiWrite === true}
