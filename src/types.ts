@@ -1003,6 +1003,13 @@ export interface FamilyPerson {
   // accepted the same way — with the document in the record.
   emancipatedDocId?: string;
   incapacityDocId?: string;
+  // Majority custody (Jason, 2026-11-21): one parent CAN lock
+  // out the other — but only with the legal document required.
+  // custodyDocId points at the court's paper on the desk;
+  // custodyHolderIds names the parent(s) it grants. Without the
+  // document, both parents stand.
+  custodyDocId?: string;
+  custodyHolderIds?: string[];
 }
 
 // Who decides for a person who does not decide for themselves
@@ -1020,6 +1027,9 @@ export function personDeciderIds(family: Family, person: FamilyPerson): string[]
     return [...(person.guardianIds || [])];
   }
   if (personIsMinor(family, person)) {
+    if (person.custodyDocId && person.custodyHolderIds && person.custodyHolderIds.length > 0) {
+      return [...person.custodyHolderIds, ...(person.guardianIds || [])];
+    }
     return childDeciderIds(person);
   }
   return [];

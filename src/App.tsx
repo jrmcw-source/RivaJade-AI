@@ -413,6 +413,8 @@ function MainApp() {
         delegateToHead: boolean;
         emancipatedDocId: string;
         incapacityDocId: string;
+        custodyDocId: string;
+        custodyHolderIds: string[];
       }
     >
   >({});
@@ -3937,6 +3939,8 @@ function MainApp() {
         delegateToHead: person.delegateToHead === true,
         emancipatedDocId: person.emancipatedDocId || '',
         incapacityDocId: person.incapacityDocId || '',
+        custodyDocId: person.custodyDocId || '',
+        custodyHolderIds: person.custodyHolderIds || [],
       }
     );
   }
@@ -3948,6 +3952,8 @@ function MainApp() {
     delegateToHead: boolean;
     emancipatedDocId: string;
     incapacityDocId: string;
+    custodyDocId: string;
+    custodyHolderIds: string[];
   }>) {
     const key = `${family.id}::${person.name}`;
     setChildEdits((prev) => ({
@@ -3957,6 +3963,42 @@ function MainApp() {
   }
 
   async function handleSaveChildDeciders(family: Family) {
+    // The roster guard (Jason, 2026-11-21): once a child has
+    // deciders, a decider's name comes off only by that decider's
+    // own hand — or by a custody holder whose court document is
+    // in this very save. The roster keeper can set a child's row
+    // up; they cannot strike a parent off it.
+    if (user) {
+      for (const person of family.people || []) {
+        const key = `${family.id}::${person.name}`;
+        const edit = childEdits[key];
+        if (!edit) continue;
+        const before = personDeciderIds(family, person);
+        if (before.length === 0) continue;
+        const merged: FamilyPerson = {
+          ...person,
+          parentIds: edit.parentIds,
+          guardianIds: edit.guardianIds,
+          guardianshipDocId: edit.guardianshipDocId,
+          emancipatedDocId: edit.emancipatedDocId,
+          incapacityDocId: edit.incapacityDocId,
+          custodyDocId: edit.custodyDocId,
+          custodyHolderIds: edit.custodyHolderIds,
+        };
+        const after = personDeciderIds(family, merged);
+        for (const removed of before.filter((uid) => !after.includes(uid))) {
+          const byOwnHand = removed === user.uid;
+          const byCustody =
+            Boolean(edit.custodyDocId) && edit.custodyHolderIds.includes(user.uid);
+          if (!byOwnHand && !byCustody) {
+            setChildFeedback(
+              `${person.name}'s row: a named parent or guardian comes off only by their own hand, or by a custody holder with the court's document on file. Nothing was saved.`
+            );
+            return;
+          }
+        }
+      }
+    }
     const people = (family.people || []).map((person) => {
       const key = `${family.id}::${person.name}`;
       const edit = childEdits[key];
@@ -3969,6 +4011,8 @@ function MainApp() {
         delegateToHead: edit.delegateToHead,
         emancipatedDocId: edit.emancipatedDocId,
         incapacityDocId: edit.incapacityDocId,
+        custodyDocId: edit.custodyDocId,
+        custodyHolderIds: edit.custodyHolderIds,
       };
     });
     try {
@@ -7700,6 +7744,53 @@ function MainApp() {
                               A judge's emancipation makes them their own decider.
                             </span>
                           </label>
+                          <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                            <span>Custody document:</span>
+                            <select
+                              value={edit.custodyDocId}
+                              onChange={(e) =>
+                                setChildEdit(fam, person, { custodyDocId: e.target.value })
+                              }
+                              className="min-h-[32px] px-2 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                            >
+                              <option value="">None filed</option>
+                              {documents.map((d) => (
+                                <option key={d.id} value={d.id}>
+                                  {d.title}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="text-[11px] text-slate-400">
+                              Majority custody, the court's paper — the only way one parent
+                              decides alone.
+                            </span>
+                          </label>
+                          {edit.custodyDocId && (
+                            <div className="flex flex-wrap gap-x-4 gap-y-1">
+                              <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                                Custody held by:
+                              </span>
+                              {candidates.map((cand) => (
+                                <label
+                                  key={`cu-${cand.userId}`}
+                                  className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={edit.custodyHolderIds.includes(cand.userId || '')}
+                                    onChange={() => {
+                                      const uid = cand.userId || '';
+                                      const next = edit.custodyHolderIds.includes(uid)
+                                        ? edit.custodyHolderIds.filter((x) => x !== uid)
+                                        : [...edit.custodyHolderIds, uid];
+                                      setChildEdit(fam, person, { custodyHolderIds: next });
+                                    }}
+                                  />
+                                  {cand.name}
+                                </label>
+                              ))}
+                            </div>
+                          )}
                           <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400">
                             <input
                               type="checkbox"
