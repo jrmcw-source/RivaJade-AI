@@ -683,13 +683,11 @@ export interface Family {
 // An account record (Jason, 2026-11-21): a login the desk keeps —
 // a bank, a medical portal, a personal account. Scoped exactly
 // like every other record (owner, household, memberIds audience,
-// scope ring, family, circles). The password is ALWAYS sealed
-// under the owner's vault key; when the record is held by a family
-// whose recovery is set up, the password is also sealed under the
-// family key so the family can open what it holds together. aiUse
-// is the owner's word on whether the assistant may use this
-// account at all — and in this build the assistant is never handed
-// a password either way.
+// scope ring, family, circles). The record itself carries NO
+// password: it names the account and points at a credential in
+// the credentials box (credentialId). The box is a separate store
+// with its own rules — the way Jason's own passwords work with
+// Moose: apart from the records, reached only through the box.
 export interface AccountRecord {
   id: string;
   userId: string;
@@ -700,9 +698,31 @@ export interface AccountRecord {
   circleIds?: string[];
   title: string;
   username: string;
+  url: string;
+  credentialId?: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+// A credential in the box (collection: credentials). The sealed
+// password and its notes live here and nowhere else. passwordSealed
+// is under the owner's vault key; when the account is held by a
+// family whose recovery is set up, passwordFamilyWrap seals it
+// under the family key too, so the family can open what it holds
+// together — through the box, by the box's read rule (owner, or a
+// member of the account's audience). aiUse is the allowance,
+// decided here in the box, per credential: whether the assistant
+// may use this credential at all. In this build the assistant is
+// never handed the value either way — the allowance records the
+// owner's word, the way Moose's own vault allowance does.
+export interface Credential {
+  id: string;
+  ownerId: string;
+  accountRecordId: string;
+  memberIds: string[];
+  familyId?: string;
   passwordSealed: string;
   passwordFamilyWrap?: string;
-  url: string;
   notesSealed?: string;
   aiUse?: boolean;
   createdAt?: unknown;

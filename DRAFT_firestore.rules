@@ -1190,7 +1190,6 @@ service cloud.firestore {
           'memberIds',
           'title',
           'username',
-          'passwordSealed',
           'url',
           'createdAt',
           'updatedAt'
@@ -1204,11 +1203,8 @@ service cloud.firestore {
           'circleIds',
           'title',
           'username',
-          'passwordSealed',
-          'passwordFamilyWrap',
           'url',
-          'notesSealed',
-          'aiUse',
+          'credentialId',
           'createdAt',
           'updatedAt'
         ])
@@ -1221,9 +1217,40 @@ service cloud.firestore {
         && (!('circleIds' in data) || isBoundedStringList(data.circleIds, 20, 128))
         && data.title is string && data.title.size() >= 1 && data.title.size() <= 120
         && data.username is string && data.username.size() <= 200
+        && data.url is string && data.url.size() <= 500
+        && (!('credentialId' in data) || (data.credentialId is string && data.credentialId.size() <= 128))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCredential(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'accountRecordId',
+          'memberIds',
+          'passwordSealed',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'accountRecordId',
+          'memberIds',
+          'familyId',
+          'passwordSealed',
+          'passwordFamilyWrap',
+          'notesSealed',
+          'aiUse',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.accountRecordId is string && data.accountRecordId.size() <= 128
+        && isBoundedStringList(data.memberIds, 100, 128)
+        && data.ownerId in data.memberIds
+        && (!('familyId' in data) || (data.familyId is string && data.familyId.size() <= 128))
         && data.passwordSealed is string && data.passwordSealed.size() <= 4000
         && (!('passwordFamilyWrap' in data) || (data.passwordFamilyWrap is string && data.passwordFamilyWrap.size() <= 4000))
-        && data.url is string && data.url.size() <= 500
         && (!('notesSealed' in data) || (data.notesSealed is string && data.notesSealed.size() <= 4000))
         && (!('aiUse' in data) || data.aiUse is bool)
         && data.createdAt is timestamp
@@ -1563,11 +1590,8 @@ service cloud.firestore {
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'title',
           'username',
-          'passwordSealed',
-          'passwordFamilyWrap',
           'url',
-          'notesSealed',
-          'aiUse',
+          'credentialId',
           'memberIds',
           'scope',
           'familyId',
@@ -1579,6 +1603,42 @@ service cloud.firestore {
           || (existingHouseholdId().size() > 0
             && isHouseholdMember(existingHouseholdId())
             && householdData(existingHouseholdId()).ownerId == request.auth.uid));
+    }
+
+    match /credentials/{credentialId} {
+      // The credentials box: its own store, its own rules. The
+      // owner alone writes. A read reaches the owner, or a member
+      // of the account's audience — and the family wrap is the only
+      // copy a member can actually open.
+      allow get: if isSignedIn() && isValidId(credentialId)
+        && (existing().ownerId == request.auth.uid || request.auth.uid in existing().memberIds);
+      allow list: if isSignedIn()
+        && (resource.data.ownerId == request.auth.uid || request.auth.uid in resource.data.get('memberIds', []));
+      allow create: if isVerifiedUser()
+        && isValidId(credentialId)
+        && isValidCredential(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(credentialId)
+        && isValidCredential(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId
+        && incoming().accountRecordId == existing().accountRecordId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'passwordSealed',
+          'passwordFamilyWrap',
+          'notesSealed',
+          'aiUse',
+          'memberIds',
+          'familyId',
+          'updatedAt'
+        ]);
+      allow delete: if isVerifiedUser() && isValidId(credentialId)
+        && existing().ownerId == request.auth.uid;
     }
 
     match /voiceMemories/{memoryId} {

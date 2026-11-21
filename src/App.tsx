@@ -84,6 +84,7 @@ import {
   familyHeadUid,
   ResetRequest,
   AccountRecord,
+  Credential,
   ProjectInvite,
   ProjectMember,
   ProjectTask,
@@ -348,6 +349,9 @@ function MainApp() {
   const [sharedPropertyEntries, setSharedPropertyEntries] = useState<PropertyEntry[]>([]);
   const [ownFinanceEntries, setOwnFinanceEntries] = useState<FinanceEntry[]>([]);
   const [ownAccountRecords, setOwnAccountRecords] = useState<AccountRecord[]>([]);
+  const [ownCredentials, setOwnCredentials] = useState<Credential[]>([]);
+  const [sharedCredentials, setSharedCredentials] = useState<Credential[]>([]);
+  const [boxFeedback, setBoxFeedback] = useState('');
   const [sharedAccountRecords, setSharedAccountRecords] = useState<AccountRecord[]>([]);
   const [acctTitle, setAcctTitle] = useState('');
   const [acctUsername, setAcctUsername] = useState('');
@@ -590,6 +594,26 @@ function MainApp() {
         );
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'accountRecords')
+    );
+
+    const unsubCredentials = onSnapshot(
+      query(collection(db, 'credentials'), where('ownerId', '==', user.uid)),
+      (snap) => {
+        setOwnCredentials(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Credential, 'id'>) }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'credentials')
+    );
+
+    const unsubCredentialsShared = onSnapshot(
+      query(collection(db, 'credentials'), where('memberIds', 'array-contains', user.uid)),
+      (snap) => {
+        setSharedCredentials(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Credential, 'id'>) }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'credentials')
     );
 
     const unsubMemories = onSnapshot(
@@ -863,6 +887,8 @@ function MainApp() {
       unsubDocsShared();
       unsubAccounts();
       unsubAccountsShared();
+      unsubCredentials();
+      unsubCredentialsShared();
       unsubMemories();
       unsubJasonNotes();
       unsubJasonNotesShared();
@@ -1051,6 +1077,10 @@ function MainApp() {
   const accountRecords = useMemo(
     () => mergeRecordsById(ownAccountRecords, sharedAccountRecords),
     [ownAccountRecords, sharedAccountRecords]
+  );
+  const credentials = useMemo(
+    () => mergeRecordsById(ownCredentials, sharedCredentials),
+    [ownCredentials, sharedCredentials]
   );
   const propertyEntries = useMemo(
     () => mergeRecordsById(ownPropertyEntries, sharedPropertyEntries),
@@ -2228,7 +2258,7 @@ function MainApp() {
       return;
     }
     if (!isVaultUnlocked()) {
-      setAcctFeedback('Unlock your vault first — a password is always sealed before it is filed.');
+      setAcctFeedback('Unlock your vault first — the password is sealed in the box before anything is filed.');
       return;
     }
     try {
@@ -2243,25 +2273,37 @@ function MainApp() {
         setAcctFeedback('That audience could not be worked out — check the family or circle you picked.');
         return;
       }
+      const familyId = typeof aimed.scopeFields.familyId === 'string' ? aimed.scopeFields.familyId : '';
       let passwordFamilyWrap: string | undefined;
-      if (acctScope === 'family') {
-        const famId = typeof aimed.scopeFields.familyId === 'string' ? aimed.scopeFields.familyId : '';
-        const famKey = famId ? getFamilyRecoveryKey(famId) : null;
+      if (acctScope === 'family' && familyId) {
+        const famKey = getFamilyRecoveryKey(familyId);
         if (famKey) passwordFamilyWrap = await sealTextWithKey(famKey, acctPassword);
       }
-      const id = createSafeId('acct');
-      await setDoc(doc(db, 'accountRecords', id), {
+      // The password goes in the box first; the record only points
+      // at it. The record itself never carries a password.
+      const recordId = createSafeId('acct');
+      const credentialId = createSafeId('cred');
+      await setDoc(doc(db, 'credentials', credentialId), {
+        ownerId: user.uid,
+        accountRecordId: recordId,
+        memberIds: aimed.memberIds,
+        ...(familyId ? { familyId } : {}),
+        passwordSealed: await sealText(acctPassword),
+        ...(passwordFamilyWrap ? { passwordFamilyWrap } : {}),
+        ...(acctNotes.trim() ? { notesSealed: await sealText(acctNotes.trim()) } : {}),
+        aiUse: acctAiUse,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      await setDoc(doc(db, 'accountRecords', recordId), {
         userId: user.uid,
         householdId: aimed.householdId,
         memberIds: aimed.memberIds,
         ...aimed.scopeFields,
         title: acctTitle.trim().slice(0, 120),
         username: acctUsername.trim().slice(0, 200),
-        passwordSealed: await sealText(acctPassword),
-        ...(passwordFamilyWrap ? { passwordFamilyWrap } : {}),
         url: acctUrl.trim().slice(0, 500),
-        ...(acctNotes.trim() ? { notesSealed: await sealText(acctNotes.trim()) } : {}),
-        aiUse: acctAiUse,
+        credentialId,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
@@ -2271,12 +2313,14 @@ function MainApp() {
       setAcctUrl('');
       setAcctNotes('');
       setAcctAiUse(false);
-      setAcctFeedback('Filed. The password is sealed; only its audience can see this record at all.');
+      setAcctFeedback('Filed. The password sits in your credentials box, sealed — the record only points at it.');
     } catch (err) {
       setAcctFeedback(err instanceof Error ? err.message : 'The account could not be filed.');
     }
   }
 
+  // Opening a password always goes through the box: the record
+  // names the credential, the box holds the sealed value.
   async function handleRevealAccountPassword(rec: AccountRecord) {
     if (revealedPasswords[rec.id]) {
       setRevealedPasswords((prev) => {
@@ -2286,26 +2330,31 @@ function MainApp() {
       });
       return;
     }
+    const cred = rec.credentialId ? credentials.find((c) => c.id === rec.credentialId) : undefined;
+    if (!cred) {
+      setAcctFeedback('No credential is linked to this record in the box.');
+      return;
+    }
     try {
-      if (user && rec.userId === user.uid) {
+      if (user && cred.ownerId === user.uid) {
         if (!isVaultUnlocked()) {
-          setAcctFeedback('Unlock your vault to open a password.');
+          setAcctFeedback('Unlock your vault to open a password from the box.');
           return;
         }
-        const opened = await unsealText(rec.passwordSealed);
+        const opened = await unsealText(cred.passwordSealed);
         setRevealedPasswords((prev) => ({ ...prev, [rec.id]: opened }));
         return;
       }
-      if (rec.passwordFamilyWrap && rec.familyId) {
-        const famKey = getFamilyRecoveryKey(rec.familyId);
+      if (cred.passwordFamilyWrap && cred.familyId) {
+        const famKey = getFamilyRecoveryKey(cred.familyId);
         if (famKey) {
-          const opened = await unsealTextWithKey(famKey, rec.passwordFamilyWrap);
+          const opened = await unsealTextWithKey(famKey, cred.passwordFamilyWrap);
           setRevealedPasswords((prev) => ({ ...prev, [rec.id]: opened }));
           return;
         }
       }
       setAcctFeedback(
-        'Only the owner can open this password — it is sealed under their vault key, and this record was not wrapped for the family.'
+        'Only the owner can open this password — it sits in their box, sealed under their vault key, and it was not wrapped for the family.'
       );
     } catch {
       setAcctFeedback('That password could not be opened on this device.');
@@ -2315,8 +2364,49 @@ function MainApp() {
   async function handleDeleteAccountRecord(rec: AccountRecord) {
     try {
       await deleteDoc(doc(db, 'accountRecords', rec.id));
+      // The box does not keep a password for a record that is gone.
+      if (rec.credentialId && user) {
+        const cred = ownCredentials.find((c) => c.id === rec.credentialId);
+        if (cred) await deleteDoc(doc(db, 'credentials', cred.id));
+      }
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `accountRecords/${rec.id}`);
+    }
+  }
+
+  async function handleRevealCredential(cred: Credential) {
+    if (revealedPasswords[cred.id]) {
+      setRevealedPasswords((prev) => {
+        const next = { ...prev };
+        delete next[cred.id];
+        return next;
+      });
+      return;
+    }
+    if (!isVaultUnlocked()) {
+      setBoxFeedback('Unlock your vault to open a password from the box.');
+      return;
+    }
+    try {
+      const opened = await unsealText(cred.passwordSealed);
+      setRevealedPasswords((prev) => ({ ...prev, [cred.id]: opened }));
+    } catch {
+      setBoxFeedback('That password could not be opened on this device.');
+    }
+  }
+
+  async function handleRemoveCredential(cred: Credential) {
+    try {
+      await deleteDoc(doc(db, 'credentials', cred.id));
+      const rec = ownAccountRecords.find((a) => a.id === cred.accountRecordId);
+      if (rec) {
+        await updateDoc(doc(db, 'accountRecords', rec.id), {
+          credentialId: '',
+          updatedAt: serverTimestamp(),
+        });
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `credentials/${cred.id}`);
     }
   }
 
@@ -5566,11 +5656,10 @@ function MainApp() {
                 Accounts &amp; passwords
               </h3>
               <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-                Logins the desk keeps — a bank, a medical portal, any account. A password is
-                always sealed under its owner's vault key before it is filed. Held by a family
-                whose recovery is set up, it is also sealed under the family key, so the
-                family can open what it holds together. The assistant is never handed a
-                password, whatever the switches below say.
+                Logins the desk keeps — a bank, a medical portal, any account. The record
+                here names the account and who holds it; the password itself never sits on
+                the record. It goes in the credentials box below, sealed, and is reached
+                only through the box.
               </p>
               {accountRecords.length > 0 && (
                 <div className="space-y-2">
@@ -5614,31 +5703,15 @@ function MainApp() {
                           {rec.username ? `Sign-in name: ${rec.username} · ` : ''}
                           {rec.url ? rec.url : 'No address on file'}
                         </p>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          {rec.credentialId
+                            ? 'Password: kept in the credentials box.'
+                            : 'No credential linked in the box.'}
+                        </p>
                         {revealedPasswords[rec.id] && (
                           <p className="text-xs font-mono text-slate-900 dark:text-slate-100 break-all">
                             {revealedPasswords[rec.id]}
                           </p>
-                        )}
-                        {rec.userId === user.uid && (
-                          <label className="flex items-start gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                            <input
-                              type="checkbox"
-                              checked={rec.aiUse === true}
-                              onChange={(e) =>
-                                void updateDoc(doc(db, 'accountRecords', rec.id), {
-                                  aiUse: e.target.checked,
-                                  updatedAt: serverTimestamp(),
-                                }).catch((err) =>
-                                  handleFirestoreError(err, OperationType.UPDATE, `accountRecords/${rec.id}`)
-                                )
-                              }
-                            />
-                            <span>
-                              The assistant may use this account when I ask it to. (In this
-                              build the assistant is never given the password itself — the
-                              switch records your word for the day it can.)
-                            </span>
-                          </label>
                         )}
                       </div>
                     ))}
@@ -5736,6 +5809,95 @@ function MainApp() {
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">{acctFeedback}</p>
                 )}
               </div>
+            </div>
+
+            <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                Credentials box
+              </h3>
+              <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                Your passwords live here, in a box of their own — apart from the records,
+                sealed under your vault key, reached only through this box. A password for an
+                account your family holds together is also sealed under the family key, so
+                the family can open it here too. Whether the assistant may use a credential
+                is decided here, per credential — and the assistant is never handed the value
+                itself; the allowance records your word.
+              </p>
+              {ownCredentials.length === 0 ? (
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  The box is empty. File an account above and its password lands here.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {ownCredentials
+                    .slice()
+                    .sort((a, b) => a.accountRecordId.localeCompare(b.accountRecordId))
+                    .map((cred) => {
+                      const rec = accountRecords.find((a) => a.id === cred.accountRecordId);
+                      return (
+                        <div
+                          key={cred.id}
+                          className="px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg space-y-1"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-medium text-slate-900 dark:text-slate-100">
+                              {rec ? rec.title : 'An account'}
+                              {rec?.username ? (
+                                <span className="text-slate-500 dark:text-slate-400">
+                                  {' '}
+                                  — {rec.username}
+                                </span>
+                              ) : null}
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => void handleRevealCredential(cred)}
+                                className="min-h-[30px] px-2.5 text-[11px] font-medium text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 hover:bg-teal-50 dark:hover:bg-teal-950/40 rounded-md"
+                              >
+                                {revealedPasswords[cred.id] ? 'Hide password' : 'Show password'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handleRemoveCredential(cred)}
+                                className="min-h-[30px] px-2.5 text-[11px] font-medium text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-md"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                          {revealedPasswords[cred.id] && (
+                            <p className="text-xs font-mono text-slate-900 dark:text-slate-100 break-all">
+                              {revealedPasswords[cred.id]}
+                            </p>
+                          )}
+                          <label className="flex items-start gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                            <input
+                              type="checkbox"
+                              checked={cred.aiUse === true}
+                              onChange={(e) =>
+                                void updateDoc(doc(db, 'credentials', cred.id), {
+                                  aiUse: e.target.checked,
+                                  updatedAt: serverTimestamp(),
+                                }).catch((err) =>
+                                  handleFirestoreError(err, OperationType.UPDATE, `credentials/${cred.id}`)
+                                )
+                              }
+                            />
+                            <span>
+                              The assistant may use this credential when I ask it to. The
+                              value itself is never handed to the assistant — this switch
+                              records your allowance, here in the box.
+                            </span>
+                          </label>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+              {boxFeedback && (
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">{boxFeedback}</p>
+              )}
             </div>
 
             <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
