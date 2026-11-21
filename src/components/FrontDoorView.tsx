@@ -94,6 +94,8 @@ interface FrontDoorViewProps {
   financeEntries: FinanceEntry[];
   documents: ScannedDocument[];
   driveConnected: boolean;
+  aiAccess?: boolean;
+  aiWrite?: boolean;
   notice: { id: number; text: string } | null;
   onCreateTask: (
     payload: Omit<
@@ -245,6 +247,8 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
     financeEntries,
     documents,
     driveConnected,
+    aiAccess,
+    aiWrite,
     notice,
     onCreateTask,
     onLogFinanceEntry,
@@ -399,6 +403,8 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
       addressName,
       currentDateTime: new Date().toLocaleString(),
       driveConnected,
+      aiAccess: aiAccess !== false,
+      aiWrite: aiWrite === true,
       tasksSummary: `Pending (${pendingTasksCount}):\n${pending || 'None'}\n\nRecent Completed:\n${
         completed || 'None'
       }`,
@@ -408,7 +414,7 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
       }`,
       documentsSummary: documentsSummary || 'No scanned documents in vault.',
     };
-  }, [userName, addressName, driveConnected, tasks, pendingTasksCount, propertyEntries, financeEntries, documents]);
+  }, [userName, addressName, driveConnected, aiAccess, aiWrite, tasks, pendingTasksCount, propertyEntries, financeEntries, documents]);
 
   function bumpActivity() {
     lastActivityRef.current = Date.now();

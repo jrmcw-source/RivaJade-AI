@@ -1251,9 +1251,17 @@ Answer with the desk id only.`;
           briefingSummary?: string;
           mailSummary?: string;
           circleSummary?: string;
+          aiAccess?: boolean;
         };
       };
       const ctx = context || {};
+      // The account holder's own switch (Jason, 2026-11-21): the
+      // assistant does no work at all for an account that turned it
+      // off, whatever the screen asks.
+      if (ctx.aiAccess === false) {
+        res.status(403).json({ error: 'The assistant is turned off for this account.' });
+        return;
+      }
       const isMail = kind === 'mail';
       const isCircles = kind === 'circles';
       const summary = String(ctx.briefingSummary || '').slice(0, 6000);
@@ -1366,8 +1374,15 @@ Write the morning briefing now, following your brief exactly.`,
           financesSummary?: string;
           documentsSummary?: string;
           driveConnected?: boolean;
+          aiAccess?: boolean;
+          aiWrite?: boolean;
         };
       };
+
+      if (context?.aiAccess === false) {
+        res.status(403).json({ error: 'The assistant is turned off for this account.' });
+        return;
+      }
 
       if (!Array.isArray(messages) || messages.length === 0) {
         res.status(400).json({ error: 'At least one user message is required.' });
@@ -1425,7 +1440,7 @@ Write the morning briefing now, following your brief exactly.`,
         model: DESK_MODEL,
         contents: `Current Date/Time: ${ctx.currentDateTime || new Date().toISOString()}
 User: ${ctx.userName || 'Steward User'}${ctx.addressName ? `\nAddress them as: ${ctx.addressName}` : ''}
-Google Drive Backup Status: ${ctx.driveConnected ? 'Connected in current session' : 'Not yet connected in this session (user can connect via Google Drive Backups)'}
+Google Drive Backup Status: ${ctx.driveConnected ? 'Connected in current session' : 'Not yet connected in this session (user can connect via Google Drive Backups)'}${ctx.aiWrite === true ? '' : '\nAuthority: the account holder has NOT given you write authority. Read and suggest only — never say you changed, saved, filed, or sent anything. Put any change you propose in plain words for the person to make themselves.'}
 
 LIVE WORKSPACE SNAPSHOT:
 1) Schedule & Tasks:

@@ -260,6 +260,9 @@ service cloud.firestore {
           'vaultRecoveryCheck',
           'wrapPublicKey',
           'wrapPrivateSealed',
+          'aiAccess',
+          'aiConnectors',
+          'aiWrite',
           'sealedKinds',
           'createdAt',
           'updatedAt'
@@ -298,6 +301,9 @@ service cloud.firestore {
         && (!('vaultRecoveryCheck' in data) || (data.vaultRecoveryCheck is string && data.vaultRecoveryCheck.size() <= 400))
         && (!('wrapPublicKey' in data) || (data.wrapPublicKey is string && data.wrapPublicKey.size() <= 2000))
         && (!('wrapPrivateSealed' in data) || (data.wrapPrivateSealed is string && data.wrapPrivateSealed.size() <= 2400))
+        && (!('aiAccess' in data) || data.aiAccess is bool)
+        && (!('aiConnectors' in data) || data.aiConnectors is bool)
+        && (!('aiWrite' in data) || data.aiWrite is bool)
         && (!('sealedKinds' in data) || isBoundedStringList(data.sealedKinds, 6, 20));
     }
 
@@ -1177,6 +1183,53 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidAccountRecord(data) {
+      return data.keys().hasAll([
+          'userId',
+          'householdId',
+          'memberIds',
+          'title',
+          'username',
+          'passwordSealed',
+          'url',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId',
+          'householdId',
+          'memberIds',
+          'scope',
+          'familyId',
+          'circleIds',
+          'title',
+          'username',
+          'passwordSealed',
+          'passwordFamilyWrap',
+          'url',
+          'notesSealed',
+          'aiUse',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.userId)
+        && data.householdId is string && data.householdId.size() <= 128
+        && isBoundedStringList(data.memberIds, 100, 128)
+        && data.userId in data.memberIds
+        && (!('scope' in data) || data.scope in ['private', 'household', 'family', 'circles'])
+        && (!('familyId' in data) || (data.familyId is string && data.familyId.size() <= 128))
+        && (!('circleIds' in data) || isBoundedStringList(data.circleIds, 20, 128))
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 120
+        && data.username is string && data.username.size() <= 200
+        && data.passwordSealed is string && data.passwordSealed.size() <= 4000
+        && (!('passwordFamilyWrap' in data) || (data.passwordFamilyWrap is string && data.passwordFamilyWrap.size() <= 4000))
+        && data.url is string && data.url.size() <= 500
+        && (!('notesSealed' in data) || (data.notesSealed is string && data.notesSealed.size() <= 4000))
+        && (!('aiUse' in data) || data.aiUse is bool)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     function isValidCircle(data) {
       return data.keys().hasAll([
           'name',
@@ -1483,6 +1536,45 @@ service cloud.firestore {
           && incoming().memberIds == householdData(existingHouseholdId()).memberIds
           && incoming().diff(existing()).affectedKeys().hasOnly(['memberIds', 'updatedAt'])));
       allow delete: if isVerifiedUser() && isValidId(documentId)
+        && (existing().userId == request.auth.uid
+          || (existingHouseholdId().size() > 0
+            && isHouseholdMember(existingHouseholdId())
+            && householdData(existingHouseholdId()).ownerId == request.auth.uid));
+    }
+
+    match /accountRecords/{recordId} {
+      allow get: if isSignedIn() && isValidId(recordId) && canAccessRecord();
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || request.auth.uid in resource.data.get('memberIds', []));
+      allow create: if isVerifiedUser()
+        && isValidId(recordId)
+        && isValidAccountRecord(incoming())
+        && incoming().userId == request.auth.uid
+        && (incoming().householdId == '' || isHouseholdMember(incoming().householdId))
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(recordId)
+        && isValidAccountRecord(incoming())
+        && existing().userId == request.auth.uid
+        && incoming().userId == existing().userId
+        && incoming().householdId == existing().householdId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'title',
+          'username',
+          'passwordSealed',
+          'passwordFamilyWrap',
+          'url',
+          'notesSealed',
+          'aiUse',
+          'memberIds',
+          'scope',
+          'familyId',
+          'circleIds',
+          'updatedAt'
+        ]);
+      allow delete: if isVerifiedUser() && isValidId(recordId)
         && (existing().userId == request.auth.uid
           || (existingHouseholdId().size() > 0
             && isHouseholdMember(existingHouseholdId())

@@ -74,6 +74,8 @@ interface AIAssistantDrawerProps {
   financeEntries: FinanceEntry[];
   documents: ScannedDocument[];
   driveConnected: boolean;
+  aiAccess?: boolean;
+  aiWrite?: boolean;
   onCreateTask: (
     payload: Omit<
       ScheduleTask,
@@ -153,6 +155,8 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
   financeEntries,
   documents,
   driveConnected,
+  aiAccess,
+  aiWrite,
   onCreateTask,
   onLogFinanceEntry,
   onCreatePropertyEntry,
@@ -256,6 +260,8 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
       userName,
       currentDateTime: new Date().toLocaleString(),
       driveConnected,
+      aiAccess: aiAccess !== false,
+      aiWrite: aiWrite === true,
       tasksSummary: `Pending (${pendingTasksCount}):\n${pending || 'None'}\n\nRecent Completed:\n${
         completed || 'None'
       }`,
@@ -265,7 +271,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
       }`,
       documentsSummary: documentsSummary || 'No scanned documents in vault.',
     };
-  }, [userName, driveConnected, tasks, pendingTasksCount, propertyEntries, financeEntries, documents]);
+  }, [userName, driveConnected, aiAccess, aiWrite, tasks, pendingTasksCount, propertyEntries, financeEntries, documents]);
 
   if (!open) return null;
 
@@ -587,6 +593,13 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
                     msg.suggestedActions &&
                     msg.suggestedActions.length > 0 && (
                       <div className="flex flex-wrap gap-2">
+                        {aiWrite !== true && (
+                          <p className="w-full text-[11px] text-slate-500 dark:text-slate-400">
+                            The assistant can suggest these, but it does not have write
+                            authority on this account — the buttons stay off, and you make
+                            the changes yourself.
+                          </p>
+                        )}
                         {msg.suggestedActions
                           .map((act, idx) => ({ act, idx }))
                           .filter(({ act }) => act.type !== 'note_for_jason')
@@ -597,7 +610,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
                             <button
                               key={actionKey}
                               type="button"
-                              disabled={done}
+                              disabled={done || aiWrite !== true}
                               onClick={() => void handleApplyAction(actionKey, act)}
                               className={`min-h-[40px] inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
                                 done

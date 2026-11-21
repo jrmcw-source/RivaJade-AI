@@ -83,6 +83,7 @@ import {
   familyHeadName,
   familyHeadUid,
   ResetRequest,
+  AccountRecord,
   ProjectInvite,
   ProjectMember,
   ProjectTask,
@@ -156,6 +157,8 @@ import {
   unwrapEphemeral,
   unwrapVaultKeyWithFamily,
   wrapVaultKeyUnderFamily,
+  sealTextWithKey,
+  unsealTextWithKey,
 } from './services/vault';
 import { PWAInstallModalTrigger } from './components/PWAInstallModal';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
@@ -344,6 +347,19 @@ function MainApp() {
   const [ownPropertyEntries, setOwnPropertyEntries] = useState<PropertyEntry[]>([]);
   const [sharedPropertyEntries, setSharedPropertyEntries] = useState<PropertyEntry[]>([]);
   const [ownFinanceEntries, setOwnFinanceEntries] = useState<FinanceEntry[]>([]);
+  const [ownAccountRecords, setOwnAccountRecords] = useState<AccountRecord[]>([]);
+  const [sharedAccountRecords, setSharedAccountRecords] = useState<AccountRecord[]>([]);
+  const [acctTitle, setAcctTitle] = useState('');
+  const [acctUsername, setAcctUsername] = useState('');
+  const [acctPassword, setAcctPassword] = useState('');
+  const [acctUrl, setAcctUrl] = useState('');
+  const [acctNotes, setAcctNotes] = useState('');
+  const [acctScope, setAcctScope] = useState<'private' | 'household' | 'family' | 'circles'>('private');
+  const [acctFamilyId, setAcctFamilyId] = useState('');
+  const [acctCircleId, setAcctCircleId] = useState('');
+  const [acctAiUse, setAcctAiUse] = useState(false);
+  const [acctFeedback, setAcctFeedback] = useState('');
+  const [revealedPasswords, setRevealedPasswords] = useState<Record<string, string>>({});
   const [sharedFinanceEntries, setSharedFinanceEntries] = useState<FinanceEntry[]>([]);
   const [ownJasonNotes, setOwnJasonNotes] = useState<JasonNote[]>([]);
   const [sharedJasonNotes, setSharedJasonNotes] = useState<JasonNote[]>([]);
@@ -554,6 +570,26 @@ function MainApp() {
         );
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'documents')
+    );
+
+    const unsubAccounts = onSnapshot(
+      query(collection(db, 'accountRecords'), where('userId', '==', user.uid)),
+      (snap) => {
+        setOwnAccountRecords(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AccountRecord, 'id'>) }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'accountRecords')
+    );
+
+    const unsubAccountsShared = onSnapshot(
+      query(collection(db, 'accountRecords'), where('memberIds', 'array-contains', user.uid)),
+      (snap) => {
+        setSharedAccountRecords(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AccountRecord, 'id'>) }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'accountRecords')
     );
 
     const unsubMemories = onSnapshot(
@@ -825,6 +861,8 @@ function MainApp() {
       unsubTasksShared();
       unsubDocs();
       unsubDocsShared();
+      unsubAccounts();
+      unsubAccountsShared();
       unsubMemories();
       unsubJasonNotes();
       unsubJasonNotesShared();
@@ -881,6 +919,10 @@ function MainApp() {
       void ensureWrapKeypairPersisted();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vaultUnlockedState]);
+
+  useEffect(() => {
+    if (!vaultUnlockedState) setRevealedPasswords({});
   }, [vaultUnlockedState]);
 
   // Load my families' recovery keys from my wraps when possible.
@@ -1005,6 +1047,10 @@ function MainApp() {
   const documents = useMemo(
     () => mergeRecordsById(ownDocuments, sharedDocuments),
     [ownDocuments, sharedDocuments]
+  );
+  const accountRecords = useMemo(
+    () => mergeRecordsById(ownAccountRecords, sharedAccountRecords),
+    [ownAccountRecords, sharedAccountRecords]
   );
   const propertyEntries = useMemo(
     () => mergeRecordsById(ownPropertyEntries, sharedPropertyEntries),
@@ -1889,6 +1935,7 @@ function MainApp() {
           context: {
             userName: userProfile?.displayName || user.displayName || 'Steward User',
             addressName: userProfile?.addressName || '',
+            aiAccess: userProfile?.aiAccess !== false,
             currentDateTime: new Date().toLocaleString('en-US', {
               weekday: 'long',
               year: 'numeric',
@@ -1959,6 +2006,9 @@ function MainApp() {
     vaultRecoveryCheck?: string;
     wrapPublicKey?: string;
     wrapPrivateSealed?: string;
+    aiAccess?: boolean;
+    aiConnectors?: boolean;
+    aiWrite?: boolean;
     sealedKinds?: RecordKind[];
   }) {
     if (!user) return;
@@ -2164,6 +2214,111 @@ function MainApp() {
     }
   }
 
+
+
+  // ---- Account records (Jason, 2026-11-21) ----
+
+  // File a login. The password is always sealed under the owner's
+  // vault key; held by a family with recovery set up, it is also
+  // sealed under the family key so the family can open it together.
+  async function handleAddAccountRecord() {
+    if (!user || !activeHousehold) return;
+    if (!acctTitle.trim() || !acctPassword) {
+      setAcctFeedback('An account needs at least a name and a password.');
+      return;
+    }
+    if (!isVaultUnlocked()) {
+      setAcctFeedback('Unlock your vault first — a password is always sealed before it is filed.');
+      return;
+    }
+    try {
+      const aimed = audienceFor(
+        acctScope,
+        acctScope === 'family' ? acctFamilyId || activeFamily?.id || '' : '',
+        acctScope === 'circles' && acctCircleId ? [acctCircleId] : [],
+        activeHousehold.id,
+        'documents'
+      );
+      if (!aimed) {
+        setAcctFeedback('That audience could not be worked out — check the family or circle you picked.');
+        return;
+      }
+      let passwordFamilyWrap: string | undefined;
+      if (acctScope === 'family') {
+        const famId = typeof aimed.scopeFields.familyId === 'string' ? aimed.scopeFields.familyId : '';
+        const famKey = famId ? getFamilyRecoveryKey(famId) : null;
+        if (famKey) passwordFamilyWrap = await sealTextWithKey(famKey, acctPassword);
+      }
+      const id = createSafeId('acct');
+      await setDoc(doc(db, 'accountRecords', id), {
+        userId: user.uid,
+        householdId: aimed.householdId,
+        memberIds: aimed.memberIds,
+        ...aimed.scopeFields,
+        title: acctTitle.trim().slice(0, 120),
+        username: acctUsername.trim().slice(0, 200),
+        passwordSealed: await sealText(acctPassword),
+        ...(passwordFamilyWrap ? { passwordFamilyWrap } : {}),
+        url: acctUrl.trim().slice(0, 500),
+        ...(acctNotes.trim() ? { notesSealed: await sealText(acctNotes.trim()) } : {}),
+        aiUse: acctAiUse,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setAcctTitle('');
+      setAcctUsername('');
+      setAcctPassword('');
+      setAcctUrl('');
+      setAcctNotes('');
+      setAcctAiUse(false);
+      setAcctFeedback('Filed. The password is sealed; only its audience can see this record at all.');
+    } catch (err) {
+      setAcctFeedback(err instanceof Error ? err.message : 'The account could not be filed.');
+    }
+  }
+
+  async function handleRevealAccountPassword(rec: AccountRecord) {
+    if (revealedPasswords[rec.id]) {
+      setRevealedPasswords((prev) => {
+        const next = { ...prev };
+        delete next[rec.id];
+        return next;
+      });
+      return;
+    }
+    try {
+      if (user && rec.userId === user.uid) {
+        if (!isVaultUnlocked()) {
+          setAcctFeedback('Unlock your vault to open a password.');
+          return;
+        }
+        const opened = await unsealText(rec.passwordSealed);
+        setRevealedPasswords((prev) => ({ ...prev, [rec.id]: opened }));
+        return;
+      }
+      if (rec.passwordFamilyWrap && rec.familyId) {
+        const famKey = getFamilyRecoveryKey(rec.familyId);
+        if (famKey) {
+          const opened = await unsealTextWithKey(famKey, rec.passwordFamilyWrap);
+          setRevealedPasswords((prev) => ({ ...prev, [rec.id]: opened }));
+          return;
+        }
+      }
+      setAcctFeedback(
+        'Only the owner can open this password — it is sealed under their vault key, and this record was not wrapped for the family.'
+      );
+    } catch {
+      setAcctFeedback('That password could not be opened on this device.');
+    }
+  }
+
+  async function handleDeleteAccountRecord(rec: AccountRecord) {
+    try {
+      await deleteDoc(doc(db, 'accountRecords', rec.id));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `accountRecords/${rec.id}`);
+    }
+  }
 
   // ---- Family recovery (Jason, 2026-11-21) ----
 
@@ -2852,7 +3007,7 @@ function MainApp() {
   // owner-only by rule — and never enters the shared briefing.
   const mailBriefingInFlightRef = useRef<string>('');
   async function handleEnsureMailBriefing(): Promise<string | null> {
-    if (!user || !userProfile?.emailEnabled) return null;
+    if (!user || !userProfile?.emailEnabled || userProfile.aiConnectors === false) return null;
     const dateKey = localDateKey();
     const existing = ownMailBriefings.find((b) => b.dateKey === dateKey);
     if (existing) return existing.text;
@@ -2877,6 +3032,7 @@ function MainApp() {
           context: {
             userName: userProfile.displayName || user.displayName || 'Steward User',
             addressName: userProfile.addressName || '',
+            aiAccess: userProfile.aiAccess !== false,
             currentDateTime: new Date().toLocaleString('en-US', {
               weekday: 'long',
               year: 'numeric',
@@ -3104,6 +3260,7 @@ function MainApp() {
           context: {
             userName: userProfile?.displayName || user.displayName || 'Steward User',
             addressName: userProfile?.addressName || '',
+            aiAccess: userProfile?.aiAccess !== false,
             currentDateTime: new Date().toLocaleString('en-US', {
               weekday: 'long',
               year: 'numeric',
@@ -5406,6 +5563,226 @@ function MainApp() {
 
             <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                Accounts &amp; passwords
+              </h3>
+              <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                Logins the desk keeps — a bank, a medical portal, any account. A password is
+                always sealed under its owner's vault key before it is filed. Held by a family
+                whose recovery is set up, it is also sealed under the family key, so the
+                family can open what it holds together. The assistant is never handed a
+                password, whatever the switches below say.
+              </p>
+              {accountRecords.length > 0 && (
+                <div className="space-y-2">
+                  {accountRecords
+                    .slice()
+                    .sort((a, b) => a.title.localeCompare(b.title))
+                    .map((rec) => (
+                      <div
+                        key={rec.id}
+                        className="px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg space-y-1"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-medium text-slate-900 dark:text-slate-100">
+                            {rec.title}
+                            <span className="text-slate-500 dark:text-slate-400">
+                              {' '}
+                              — {rec.scope === 'family' ? 'held by the family' : rec.scope === 'circles' ? 'held by a circle' : rec.scope === 'household' ? 'this household' : 'just the owner'}
+                              {rec.userId !== user.uid ? ' · filed by another member' : ''}
+                            </span>
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => void handleRevealAccountPassword(rec)}
+                              className="min-h-[30px] px-2.5 text-[11px] font-medium text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 hover:bg-teal-50 dark:hover:bg-teal-950/40 rounded-md"
+                            >
+                              {revealedPasswords[rec.id] ? 'Hide password' : 'Show password'}
+                            </button>
+                            {rec.userId === user.uid && (
+                              <button
+                                type="button"
+                                onClick={() => void handleDeleteAccountRecord(rec)}
+                                className="min-h-[30px] px-2.5 text-[11px] font-medium text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-md"
+                              >
+                                Remove
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          {rec.username ? `Sign-in name: ${rec.username} · ` : ''}
+                          {rec.url ? rec.url : 'No address on file'}
+                        </p>
+                        {revealedPasswords[rec.id] && (
+                          <p className="text-xs font-mono text-slate-900 dark:text-slate-100 break-all">
+                            {revealedPasswords[rec.id]}
+                          </p>
+                        )}
+                        {rec.userId === user.uid && (
+                          <label className="flex items-start gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                            <input
+                              type="checkbox"
+                              checked={rec.aiUse === true}
+                              onChange={(e) =>
+                                void updateDoc(doc(db, 'accountRecords', rec.id), {
+                                  aiUse: e.target.checked,
+                                  updatedAt: serverTimestamp(),
+                                }).catch((err) =>
+                                  handleFirestoreError(err, OperationType.UPDATE, `accountRecords/${rec.id}`)
+                                )
+                              }
+                            />
+                            <span>
+                              The assistant may use this account when I ask it to. (In this
+                              build the assistant is never given the password itself — the
+                              switch records your word for the day it can.)
+                            </span>
+                          </label>
+                        )}
+                      </div>
+                    ))}
+                </div>
+              )}
+              <div className="space-y-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    value={acctTitle}
+                    onChange={(e) => setAcctTitle(e.target.value)}
+                    placeholder="Account name — the bank, the portal"
+                    className="min-h-[38px] px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
+                  />
+                  <input
+                    type="text"
+                    value={acctUsername}
+                    onChange={(e) => setAcctUsername(e.target.value)}
+                    placeholder="Sign-in name"
+                    className="min-h-[38px] px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
+                  />
+                  <input
+                    type="password"
+                    value={acctPassword}
+                    onChange={(e) => setAcctPassword(e.target.value)}
+                    placeholder="Password"
+                    autoComplete="new-password"
+                    className="min-h-[38px] px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
+                  />
+                  <input
+                    type="text"
+                    value={acctUrl}
+                    onChange={(e) => setAcctUrl(e.target.value)}
+                    placeholder="Web address (optional)"
+                    className="min-h-[38px] px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
+                  />
+                </div>
+                <input
+                  type="text"
+                  value={acctNotes}
+                  onChange={(e) => setAcctNotes(e.target.value)}
+                  placeholder="Notes (optional, sealed with the password)"
+                  className="w-full min-h-[38px] px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                    <span>Who holds it:</span>
+                    <select
+                      value={acctScope}
+                      onChange={(e) => setAcctScope(e.target.value as typeof acctScope)}
+                      className="min-h-[34px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                    >
+                      <option value="private">Just me</option>
+                      <option value="household">This household</option>
+                      <option value="family">A family</option>
+                      <option value="circles">A circle</option>
+                    </select>
+                  </label>
+                  {acctScope === 'family' && (
+                    <select
+                      value={acctFamilyId || activeFamily?.id || ''}
+                      onChange={(e) => setAcctFamilyId(e.target.value)}
+                      className="min-h-[34px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                    >
+                      {families.map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {acctScope === 'circles' && (
+                    <select
+                      value={acctCircleId}
+                      onChange={(e) => setAcctCircleId(e.target.value)}
+                      className="min-h-[34px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                    >
+                      <option value="">Pick a circle</option>
+                      {circles.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void handleAddAccountRecord()}
+                    className="min-h-[38px] px-3 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-lg"
+                  >
+                    File this account
+                  </button>
+                </div>
+                {acctFeedback && (
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">{acctFeedback}</p>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                The assistant
+              </h3>
+              <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                What the assistant may do on this account. These are your switches — the desk
+                and the assistant both answer to them.
+              </p>
+              <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400">
+                <input
+                  type="checkbox"
+                  checked={userProfile?.aiAccess !== false}
+                  onChange={(e) => void handleUpdateDeskPrefs({ aiAccess: e.target.checked })}
+                />
+                <span>
+                  The assistant may work for me. Off means no chat, no briefings, no voice
+                  help — the desk keeps everything, the assistant does nothing.
+                </span>
+              </label>
+              <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400">
+                <input
+                  type="checkbox"
+                  checked={userProfile?.aiConnectors !== false}
+                  onChange={(e) => void handleUpdateDeskPrefs({ aiConnectors: e.target.checked })}
+                />
+                <span>
+                  The assistant may use my connected services — the mail I turned on, my Drive
+                  backups. Off keeps the assistant to what is already on the desk.
+                </span>
+              </label>
+              <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400">
+                <input
+                  type="checkbox"
+                  checked={userProfile?.aiWrite === true}
+                  onChange={(e) => void handleUpdateDeskPrefs({ aiWrite: e.target.checked })}
+                />
+                <span>
+                  The assistant may make changes I approve — its suggestion buttons work. Off
+                  means it can read and suggest in words, and every change is mine to make.
+                </span>
+              </label>
+            </div>
+
+            <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
                 Family Household
               </h3>
               {activeHousehold ? (
@@ -6416,6 +6793,8 @@ function MainApp() {
         financeEntries={visibleFinanceEntries}
         documents={visibleDocuments}
         driveConnected={driveConnected}
+        aiAccess={userProfile?.aiAccess !== false}
+        aiWrite={userProfile?.aiWrite === true}
         onCreateTask={handleCreateTask}
         onLogFinanceEntry={handleCreateFinanceEntry}
         onCreatePropertyEntry={handleCreatePropertyEntry}
@@ -6441,6 +6820,8 @@ function MainApp() {
           financeEntries={visibleFinanceEntries}
           documents={visibleDocuments}
           driveConnected={driveConnected}
+        aiAccess={userProfile?.aiAccess !== false}
+        aiWrite={userProfile?.aiWrite === true}
           notice={frontDoorNotice}
           onCreateTask={handleCreateTask}
           onLogFinanceEntry={handleCreateFinanceEntry}

@@ -367,6 +367,14 @@ export interface UserProfile {
   // the clear.
   wrapPublicKey?: string;
   wrapPrivateSealed?: string;
+  // The assistant's authority (Jason, 2026-11-21): three switches,
+  // each the account holder's own. aiAccess absent = the assistant
+  // may work; aiConnectors absent = it may use the connected
+  // services (mail, Drive) the person turned on; aiWrite absent =
+  // it may read and suggest only, never change a record.
+  aiAccess?: boolean;
+  aiConnectors?: boolean;
+  aiWrite?: boolean;
   sealedKinds?: RecordKind[];
   createdAt?: unknown;
   updatedAt?: unknown;
@@ -672,6 +680,35 @@ export interface Family {
 // One counted person on a family's roster. birthYear is what
 // seniority is figured from; living=false marks someone the family
 // has lost (they stay on the roster — the circle doesn't forget).
+// An account record (Jason, 2026-11-21): a login the desk keeps —
+// a bank, a medical portal, a personal account. Scoped exactly
+// like every other record (owner, household, memberIds audience,
+// scope ring, family, circles). The password is ALWAYS sealed
+// under the owner's vault key; when the record is held by a family
+// whose recovery is set up, the password is also sealed under the
+// family key so the family can open what it holds together. aiUse
+// is the owner's word on whether the assistant may use this
+// account at all — and in this build the assistant is never handed
+// a password either way.
+export interface AccountRecord {
+  id: string;
+  userId: string;
+  householdId: string;
+  memberIds: string[];
+  scope?: 'private' | 'household' | 'family' | 'circles';
+  familyId?: string;
+  circleIds?: string[];
+  title: string;
+  username: string;
+  passwordSealed: string;
+  passwordFamilyWrap?: string;
+  url: string;
+  notesSealed?: string;
+  aiUse?: boolean;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
 export interface FamilyRecovery {
   check: string;
   wraps: Record<string, string>;

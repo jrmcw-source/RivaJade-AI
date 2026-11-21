@@ -555,6 +555,17 @@ export async function exportFamilyRecoveryKeyRaw(familyId: string): Promise<stri
   }
 }
 
+// Seal or open text under a key the caller names — the family
+// recovery key, for records a family shares (account passwords a
+// family holds together). Same envelope as the vault's own seals.
+export async function sealTextWithKey(key: CryptoKey, text: string): Promise<string> {
+  return sealWith(key, text);
+}
+
+export async function unsealTextWithKey(key: CryptoKey, envelope: string): Promise<string> {
+  return unsealWith(key, envelope);
+}
+
 export function bytesToB64Public(bytes: Uint8Array): string {
   return bytesToB64(bytes);
 }
