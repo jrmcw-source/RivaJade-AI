@@ -506,6 +506,45 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
         </div>
       </div>
 
+      {/* Family photo shelf: pictures kept as pictures. A photo
+          rides here when its document carries the 'photo' tag;
+          the shelf shows only what the reader may already see. */}
+      {documents.filter((d) => (d.tags || []).includes('photo') && (d.imageUrl || d.driveFileId)).length > 0 && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-3">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+              Family photo shelf
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Pictures kept as pictures. Open one to see it full-size, change who can
+              see it, or take it off the shelf.
+            </p>
+          </div>
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+            {documents
+              .filter((d) => (d.tags || []).includes('photo') && (d.imageUrl || d.driveFileId))
+              .map((d) => (
+                <button
+                  key={d.id}
+                  type="button"
+                  onClick={() => setSelectedDocId(d.id)}
+                  className="group text-left"
+                >
+                  <img
+                    src={drivePhotoSrc[d.id] || d.imageUrl}
+                    onError={() => void loadPhotoFromDrive(d)}
+                    alt={d.title}
+                    className="w-full aspect-square object-cover rounded-lg border border-slate-200 dark:border-slate-800"
+                  />
+                  <span className="block text-[11px] mt-1 text-slate-600 dark:text-slate-300 truncate">
+                    {d.title}
+                  </span>
+                </button>
+              ))}
+          </div>
+        </div>
+      )}
+
       {/* Full-Text OCR & Tag Search Controls */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-3">
         <div className="flex flex-col md:flex-row gap-3">
@@ -823,6 +862,29 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
                     The child's parents decide for records about them.
                   </span>
                 </label>
+              )}
+              {(selectedDoc.imageUrl || selectedDoc.driveFileId) && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void onUpdateDocument(selectedDoc.id, {
+                        tags: (selectedDoc.tags || []).includes('photo')
+                          ? (selectedDoc.tags || []).filter((t) => t !== 'photo')
+                          : [...(selectedDoc.tags || []), 'photo'],
+                      })
+                    }
+                    className="min-h-[36px] px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-700 dark:text-slate-200"
+                  >
+                    {(selectedDoc.tags || []).includes('photo')
+                      ? 'Take off the photo shelf'
+                      : 'Put on the photo shelf'}
+                  </button>
+                  <span className="text-[11px] text-slate-400">
+                    The shelf shows pictures as pictures, at the same reach as the
+                    record itself.
+                  </span>
+                </div>
               )}
               <form
                 onSubmit={(e) => {

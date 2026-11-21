@@ -1367,6 +1367,7 @@ service cloud.firestore {
           'bloodType',
           'conditionsNote',
           'wishes',
+          'careNotes',
           'notes',
           'createdAt',
           'updatedAt'
@@ -1387,6 +1388,7 @@ service cloud.firestore {
         && (!('bloodType' in data) || (data.bloodType is string && data.bloodType.size() <= 20))
         && (!('conditionsNote' in data) || (data.conditionsNote is string && data.conditionsNote.size() <= 2000))
         && (!('wishes' in data) || (data.wishes is string && data.wishes.size() <= 2000))
+    && (!('careNotes' in data) || (data.careNotes is string && data.careNotes.size() <= 2000))
         && (!('notes' in data) || (data.notes is string && data.notes.size() <= 2000))
         && (!('subjectName' in data) || (data.subjectName is string && data.subjectName.size() <= 120))
         && (!('subjectFamilyId' in data) || (data.subjectFamilyId is string && data.subjectFamilyId.size() <= 128))
@@ -1395,7 +1397,20 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
-    function isValidChildProposal(data) {
+    function isValidSharedList(data) {
+  return data.keys().hasAll(['userId', 'householdId', 'memberIds', 'title', 'items', 'createdAt', 'updatedAt'])
+    && data.keys().hasOnly(['userId', 'householdId', 'memberIds', 'scope', 'familyId', 'circleIds', 'title', 'items', 'createdAt', 'updatedAt'])
+    && data.userId is string && data.userId.size() > 0 && data.userId.size() <= 128
+    && data.householdId is string && data.householdId.size() <= 128
+    && data.memberIds is list && data.memberIds.size() <= 100
+    && (!('scope' in data) || data.scope == 'private' || data.scope == 'household' || data.scope == 'family' || data.scope == 'circles')
+    && (!('familyId' in data) || (data.familyId is string && data.familyId.size() <= 128))
+    && (!('circleIds' in data) || (data.circleIds is list && data.circleIds.size() <= 50))
+    && data.title is string && data.title.size() > 0 && data.title.size() <= 200
+    && data.items is list && data.items.size() <= 300;
+}
+
+function isValidChildProposal(data) {
   return data.keys().hasAll(['kind', 'familyId', 'subjectName', 'decidedByIds', 'proposedBy', 'proposedByName', 'status', 'approvals', 'declines', 'createdAt', 'updatedAt'])
     && data.keys().hasOnly(['kind', 'familyId', 'subjectName', 'decidedByIds', 'proposedBy', 'proposedByName', 'sheetId', 'sheetPayload', 'rosterPayload', 'status', 'approvals', 'declines', 'createdAt', 'updatedAt'])
     && (data.kind == 'sheet' || data.kind == 'roster')
@@ -1956,6 +1971,7 @@ function isValidGiveProposal(data) {
           'bloodType',
           'conditionsNote',
           'wishes',
+          'careNotes',
           'notes',
           'memberIds',
           'scope',
@@ -1986,6 +2002,7 @@ function isValidGiveProposal(data) {
           'bloodType',
           'conditionsNote',
           'wishes',
+          'careNotes',
           'notes',
           'memberIds',
           'scope',
@@ -1997,6 +2014,45 @@ function isValidGiveProposal(data) {
           'updatedAt'
         ]));
       allow delete: if isVerifiedUser() && isValidId(sheetId)
+        && existing().userId == request.auth.uid;
+    }
+
+    match /sharedLists/{listId} {
+      // One list at a reach, like every other record. The owner
+      // keeps it; anyone in the audience can check an item off —
+      // that is what a shared list is for.
+      allow get: if isSignedIn() && isValidId(listId)
+        && (existing().userId == request.auth.uid
+          || request.auth.uid in existing().memberIds);
+      allow list: if isSignedIn()
+        && (resource.data.userId == request.auth.uid
+          || request.auth.uid in resource.data.get('memberIds', []));
+      allow create: if isVerifiedUser()
+        && isValidId(listId)
+        && isValidSharedList(incoming())
+        && incoming().userId == request.auth.uid
+        && (incoming().householdId == '' || isHouseholdMember(incoming().householdId))
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(listId)
+        && isValidSharedList(incoming())
+        && existing().userId == request.auth.uid
+        && incoming().userId == existing().userId
+        && incoming().householdId == existing().householdId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'items', 'memberIds', 'scope', 'familyId', 'circleIds', 'updatedAt']);
+      allow update: if isVerifiedUser()
+        && isValidId(listId)
+        && isValidSharedList(incoming())
+        && request.auth.uid in existing().memberIds
+        && incoming().userId == existing().userId
+        && incoming().householdId == existing().householdId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['items', 'updatedAt']);
+      allow delete: if isVerifiedUser() && isValidId(listId)
         && existing().userId == request.auth.uid;
     }
 

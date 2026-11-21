@@ -871,6 +871,11 @@ export interface EmergencySheet {
   bloodType?: string;
   conditionsNote?: string;
   wishes?: string;
+  // The hand-off words (Jason, 2026-11-21): do's and don'ts,
+  // house rules, who to call when — what goes with the child to
+  // the babysitter or the vacation relative, in the parents'
+  // own words.
+  careNotes?: string;
   notes?: string;
   createdAt?: unknown;
   updatedAt?: unknown;
@@ -1439,4 +1444,29 @@ export function getLocalTodayIso(): string {
 export function createSafeId(prefix = 'id'): string {
   const rand = Math.random().toString(36).slice(2, 10);
   return `${prefix}_${Date.now()}_${rand}`.replace(/[^a-zA-Z0-9_-]/g, '');
+}
+
+
+// A shared list (Jason, 2026-11-21): the grocery run, the camp
+// packing, the party supplies — one list, held at a reach like
+// every other record, that anyone in its audience can check
+// off. The depositor owns it; checking an item is the shared
+// act the audience is for.
+export interface SharedListItem {
+  text: string;
+  done: boolean;
+}
+
+export interface SharedList {
+  id: string;
+  userId: string;
+  householdId: string;
+  memberIds: string[];
+  scope?: 'private' | 'household' | 'family' | 'circles';
+  familyId?: string;
+  circleIds?: string[];
+  title: string;
+  items: SharedListItem[];
+  createdAt?: unknown;
+  updatedAt?: unknown;
 }

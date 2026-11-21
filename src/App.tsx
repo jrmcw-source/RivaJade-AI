@@ -95,6 +95,7 @@ import {
   GiftEntry,
   DirectoryEntry,
   EmergencySheet,
+  SharedList,
   FamilyStorage,
   ProjectInvite,
   ProjectMember,
@@ -372,6 +373,8 @@ function MainApp() {
   const [ownEmergencySheets, setOwnEmergencySheets] = useState<EmergencySheet[]>([]);
   const [sharedEmergencySheets, setSharedEmergencySheets] = useState<EmergencySheet[]>([]);
   const [deciderEmergencySheets, setDeciderEmergencySheets] = useState<EmergencySheet[]>([]);
+  const [ownLists, setOwnLists] = useState<SharedList[]>([]);
+  const [sharedListsIn, setSharedListsIn] = useState<SharedList[]>([]);
   const [childProposalsAsDecider, setChildProposalsAsDecider] = useState<ChildChangeProposal[]>([]);
   const [childProposalsMine, setChildProposalsMine] = useState<ChildChangeProposal[]>([]);
   const [sharedDirectoryEntries, setSharedDirectoryEntries] = useState<DirectoryEntry[]>([]);
@@ -403,6 +406,7 @@ function MainApp() {
   const [sheetConditions, setSheetConditions] = useState('');
   const [sheetWishes, setSheetWishes] = useState('');
   const [sheetNotes, setSheetNotes] = useState('');
+  const [sheetCareNotes, setSheetCareNotes] = useState('');
   const [sheetScope, setSheetScope] = useState<'private' | 'household' | 'family'>('household');
   const [sheetFamilyId, setSheetFamilyId] = useState('');
   const [sheetFeedback, setSheetFeedback] = useState('');
@@ -1277,6 +1281,43 @@ function MainApp() {
         deciderEmergencySheets
       ),
     [ownEmergencySheets, sharedEmergencySheets, deciderEmergencySheets]
+  );
+
+  useEffect(() => {
+    if (!db || !user) {
+      setOwnLists([]);
+      return;
+    }
+    return onSnapshot(
+      query(collection(db, 'sharedLists'), where('userId', '==', user.uid)),
+      (snapshot) => {
+        setOwnLists(
+          snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<SharedList, 'id'>) }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'sharedLists')
+    );
+  }, [user]);
+
+  useEffect(() => {
+    if (!db || !user) {
+      setSharedListsIn([]);
+      return;
+    }
+    return onSnapshot(
+      query(collection(db, 'sharedLists'), where('memberIds', 'array-contains', user.uid)),
+      (snapshot) => {
+        setSharedListsIn(
+          snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<SharedList, 'id'>) }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'sharedLists')
+    );
+  }, [user]);
+
+  const sharedLists = useMemo(
+    () => mergeRecordsById(ownLists, sharedListsIn),
+    [ownLists, sharedListsIn]
   );
 
   const propertyEntries = useMemo(
@@ -4154,6 +4195,7 @@ function MainApp() {
     setSheetBloodType(mine.bloodType || '');
     setSheetConditions(mine.conditionsNote || '');
     setSheetWishes(mine.wishes || '');
+    setSheetCareNotes(mine.careNotes || '');
     setSheetNotes(mine.notes || '');
     setSheetScope(mine.scope === 'private' || mine.scope === 'family' ? mine.scope : 'household');
     setSheetFamilyId(mine.familyId || '');
@@ -4251,6 +4293,64 @@ function MainApp() {
     }
   }
 
+  const [listFeedback, setListFeedback] = useState('');
+  const [listTitle, setListTitle] = useState('');
+  const [listScope, setListScope] = useState<'private' | 'household' | 'family'>('household');
+  const [listFamilyId, setListFamilyId] = useState('');
+  const [listItemDrafts, setListItemDrafts] = useState<Record<string, string>>({});
+
+  async function handleCreateList() {
+    if (!db || !user || !listTitle.trim()) return;
+    try {
+      const aud = audienceFor(
+        listScope,
+        listFamilyId || undefined,
+        [],
+        activeHousehold?.householdId || '',
+        'tasks'
+      );
+      if (!aud) return;
+      await setDoc(doc(db, 'sharedLists', createSafeId('lst')), {
+        userId: user.uid,
+        householdId: aud.householdId,
+        memberIds: aud.memberIds,
+        scope: listScope,
+        familyId: listScope === 'family' ? listFamilyId : '',
+        circleIds: [],
+        title: listTitle.trim(),
+        items: [],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setListTitle('');
+      setListFeedback('The list is started, at the reach you picked.');
+    } catch (err) {
+      setListFeedback(err instanceof Error ? err.message : 'The list could not be started.');
+    }
+  }
+
+  async function handleListItems(list: SharedList, items: SharedList['items']) {
+    if (!db || !user) return;
+    try {
+      await updateDoc(doc(db, 'sharedLists', list.id), {
+        items,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      setListFeedback(err instanceof Error ? err.message : 'That change did not save.');
+    }
+  }
+
+  async function handleDeleteList(list: SharedList) {
+    if (!db || !user) return;
+    try {
+      await deleteDoc(doc(db, 'sharedLists', list.id));
+      setListFeedback('The list is gone.');
+    } catch (err) {
+      setListFeedback(err instanceof Error ? err.message : 'That list would not delete.');
+    }
+  }
+
   async function handleSaveEmergencySheet() {
     if (!user) return;
     const forName = sheetForName.trim();
@@ -4278,6 +4378,7 @@ function MainApp() {
       bloodType: sheetBloodType.trim(),
       conditionsNote: sheetConditions.trim(),
       wishes: sheetWishes.trim(),
+      careNotes: sheetCareNotes.trim(),
       notes: sheetNotes.trim(),
       scope: sheetScope,
       familyId: sheetScope === 'family' ? sheetFamilyId : '',
@@ -4397,6 +4498,7 @@ function MainApp() {
     credentials,
     directoryEntries,
     emergencySheets,
+    sharedLists,
   };
   const autoBackupBusyRef = useRef(false);
   useEffect(() => {
@@ -4443,6 +4545,7 @@ function MainApp() {
           accountRecords: dropOff(rawData.accountRecords || []),
           directoryEntries: dropOff(rawData.directoryEntries || []),
           emergencySheets: dropOff(rawData.emergencySheets || []),
+          sharedLists: dropOff(rawData.sharedLists || []),
         };
         if (st?.backupScope === 'documents') {
           data = {
@@ -4456,6 +4559,7 @@ function MainApp() {
             credentials: [],
             directoryEntries: [],
             emergencySheets: [],
+            sharedLists: [],
           };
         } else if (st?.backupScope === 'finances-official') {
           data = {
@@ -4467,6 +4571,7 @@ function MainApp() {
             accountRecords: [],
             directoryEntries: [],
             emergencySheets: [],
+            sharedLists: [],
             documents: data.documents.filter(
               (d) => d.recordKind === 'official' || d.recordKind === 'financial'
             ),
@@ -5828,6 +5933,11 @@ function MainApp() {
     }
     for (const sh of Array.isArray(snapshot.emergencySheets) ? snapshot.emergencySheets : []) {
       if (await restoreOwnDoc('emergencySheets', sh as Record<string, unknown>, (sh as { userId?: string }).userId)) {
+        importedCount += 1;
+      }
+    }
+    for (const li of Array.isArray(snapshot.sharedLists) ? snapshot.sharedLists : []) {
+      if (await restoreOwnDoc('sharedLists', li as Record<string, unknown>, (li as { userId?: string }).userId)) {
         importedCount += 1;
       }
     }
@@ -7749,6 +7859,13 @@ function MainApp() {
                   className="w-full px-2.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
                 />
                 <textarea
+                  value={sheetCareNotes}
+                  onChange={(e) => setSheetCareNotes(e.target.value)}
+                  placeholder="Care notes — do's and don'ts, house rules, who to call when"
+                  rows={2}
+                  className="w-full px-2.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                />
+                <textarea
                   value={sheetNotes}
                   onChange={(e) => setSheetNotes(e.target.value)}
                   placeholder="Anything else that belongs on the sheet"
@@ -7843,6 +7960,11 @@ function MainApp() {
                           <span className="font-medium">Wishes:</span> {sh.wishes}
                         </p>
                       )}
+                      {sh.careNotes && (
+                        <p className="text-xs whitespace-pre-line text-slate-600 dark:text-slate-300 mt-1">
+                          <span className="font-medium">Care notes:</span> {sh.careNotes}
+                        </p>
+                      )}
                       {sh.notes && (
                         <p className="text-xs whitespace-pre-line text-slate-600 dark:text-slate-300 mt-1">
                           {sh.notes}
@@ -7852,6 +7974,150 @@ function MainApp() {
                   ))}
                 </div>
               )}
+            </div>
+
+            <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                Shared lists
+              </h3>
+              <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                One list, held at the reach you pick, like every other record. Anyone
+                who can see a list can check an item off — that is what a shared list
+                is for.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  value={listTitle}
+                  onChange={(e) => setListTitle(e.target.value)}
+                  placeholder="New list — groceries, packing, supplies…"
+                  className="min-w-[220px] flex-1 px-2.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                />
+                <select
+                  value={listScope}
+                  onChange={(e) =>
+                    setListScope(e.target.value as 'private' | 'household' | 'family')
+                  }
+                  className="min-h-[36px] px-2 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                >
+                  <option value="private">Just me</option>
+                  <option value="household">Household</option>
+                  <option value="family">Family</option>
+                </select>
+                {listScope === 'family' && (
+                  <select
+                    value={listFamilyId}
+                    onChange={(e) => setListFamilyId(e.target.value)}
+                    className="min-h-[36px] px-2 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                  >
+                    <option value="">Pick a family</option>
+                    {families.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void handleCreateList()}
+                  className="min-h-[36px] px-3 text-xs bg-teal-700 hover:bg-teal-600 text-white rounded-md"
+                >
+                  Start the list
+                </button>
+              </div>
+              {listFeedback && (
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">{listFeedback}</p>
+              )}
+              <div className="space-y-3">
+                {sharedLists.map((list) => (
+                  <div
+                    key={list.id}
+                    className="px-3 py-2 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 rounded-lg space-y-2"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                        {list.title}
+                        <span className="ml-2 text-[11px] font-normal text-slate-400">
+                          {list.scope === 'family'
+                            ? 'Family'
+                            : list.scope === 'private'
+                              ? 'Just me'
+                              : 'Household'}
+                        </span>
+                      </p>
+                      {user && list.userId === user.uid && (
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteList(list)}
+                          className="text-[11px] text-slate-400 hover:text-red-500"
+                        >
+                          Delete list
+                        </button>
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      {(list.items || []).map((item, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={item.done}
+                            onChange={() =>
+                              void handleListItems(
+                                list,
+                                (list.items || []).map((it, i) =>
+                                  i === idx ? { ...it, done: !it.done } : it
+                                )
+                              )
+                            }
+                          />
+                          <span
+                            className={`flex-1 text-sm ${item.done ? 'line-through text-slate-400' : 'text-slate-700 dark:text-slate-200'}`}
+                          >
+                            {item.text}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void handleListItems(
+                                list,
+                                (list.items || []).filter((_, i) => i !== idx)
+                              )
+                            }
+                            className="text-[11px] text-slate-400 hover:text-red-500"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        value={listItemDrafts[list.id] || ''}
+                        onChange={(e) =>
+                          setListItemDrafts((prev) => ({ ...prev, [list.id]: e.target.value }))
+                        }
+                        placeholder="Add an item…"
+                        className="flex-1 px-2 py-1.5 text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const text = (listItemDrafts[list.id] || '').trim();
+                          if (!text) return;
+                          setListItemDrafts((prev) => ({ ...prev, [list.id]: '' }));
+                          void handleListItems(list, [
+                            ...(list.items || []),
+                            { text, done: false },
+                          ]);
+                        }}
+                        className="min-h-[32px] px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-md text-slate-700 dark:text-slate-200"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
