@@ -11,6 +11,9 @@ import {
   X,
 } from 'lucide-react';
 import {
+  AccountRecord,
+  Credential,
+  DirectoryEntry,
   Circle,
   CircleBriefing,
   Family,
@@ -42,6 +45,7 @@ import {
   deleteDriveBackupFile,
   downloadDriveBackupContent,
   ensureStewardBackupFolder,
+  ensureStewardSubfolder,
   uploadDriveBinaryFile,
   listDriveBackups,
   overwriteDriveBackupFile,
@@ -78,6 +82,12 @@ interface GoogleDriveBackupModalProps {
   briefings?: MorningBriefing[];
   mailBriefings?: MailBriefing[];
   circleBriefings?: CircleBriefing[];
+  accountRecords?: AccountRecord[];
+  credentials?: Credential[];
+  directoryEntries?: DirectoryEntry[];
+  // The family head's chosen root folder, when it is not the
+  // desk's own (Jason, 2026-11-21): backups live under it.
+  storageRootParentId?: string;
   onRestoreSnapshot: (snapshot: WorkspaceBackupSnapshot) => Promise<{ importedCount: number }>;
   onLinkDocumentPhoto?: (docId: string, driveFileId: string) => Promise<void>;
 }
@@ -125,6 +135,10 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
   briefings,
   mailBriefings,
   circleBriefings,
+  accountRecords,
+  credentials,
+  directoryEntries,
+  storageRootParentId,
   onRestoreSnapshot,
   onLinkDocumentPhoto,
 }) => {
@@ -154,7 +168,11 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
     setLoadingFiles(true);
     setErrorMsg(null);
     try {
-      const fId = folderId || (await ensureStewardBackupFolder(tok));
+      const fId =
+        folderId ||
+        (storageRootParentId
+          ? await ensureStewardSubfolder(tok, storageRootParentId, 'Steward Backups')
+          : await ensureStewardBackupFolder(tok));
       setFolderId(fId);
       const list = await listDriveBackups(tok, fId);
       setFiles(list);
@@ -202,6 +220,9 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
           briefings,
           mailBriefings,
           circleBriefings,
+          accountRecords,
+          credentials,
+          directoryEntries,
         }),
       };
     }
@@ -252,7 +273,11 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
     setErrorMsg(null);
     setSuccessMsg(null);
     try {
-      const fId = folderId || (await ensureStewardBackupFolder(accessToken));
+      const fId =
+        folderId ||
+        (storageRootParentId
+          ? await ensureStewardSubfolder(accessToken, storageRootParentId, 'Steward Backups')
+          : await ensureStewardBackupFolder(accessToken));
       setFolderId(fId);
       const payload = buildPayloadForKind(kind);
       const created = await createDriveBackupFile(accessToken, {

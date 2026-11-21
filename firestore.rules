@@ -1137,6 +1137,7 @@ service cloud.firestore {
           'notYetIds',
           'childWriterIds',
           'recovery',
+          'storage',
           'createdAt',
           'updatedAt'
         ])
@@ -1161,6 +1162,7 @@ service cloud.firestore {
           && data.recovery.check is string && data.recovery.check.size() <= 400
           && data.recovery.wraps is map && data.recovery.wraps.size() <= 100
           && (!('headKeyWrap' in data.recovery) || (data.recovery.headKeyWrap is string && data.recovery.headKeyWrap.size() <= 400))))
+        && (!('storage' in data) || (data.storage is map && data.storage.keys().hasOnly(['rootChoice', 'rootId', 'rootLabel', 'backupsEnabled', 'backupFrequency', 'backupScope'])))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -2149,7 +2151,7 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && existing().ownerId == request.auth.uid
-        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'memberIds', 'people', 'headMode', 'headNames', 'responsibleAge', 'notYetIds', 'childWriterIds', 'recovery', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'memberIds', 'people', 'headMode', 'headNames', 'responsibleAge', 'notYetIds', 'childWriterIds', 'recovery', 'storage', 'updatedAt']);
       allow update: if isVerifiedUser()
         && isValidId(familyId)
         && isValidFamily(incoming())
@@ -2157,7 +2159,7 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && request.auth.uid in existing().memberIds
-        && incoming().diff(existing()).affectedKeys().hasOnly(['recovery', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['recovery', 'storage', 'updatedAt']);
       allow delete: if isVerifiedUser() && isValidId(familyId) && existing().ownerId == request.auth.uid;
     }
 

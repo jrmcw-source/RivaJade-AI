@@ -1,6 +1,9 @@
 import {
+  AccountRecord,
   Circle,
   CircleBriefing,
+  Credential,
+  DirectoryEntry,
   Family,
   FinanceEntry,
   Household,
@@ -45,6 +48,13 @@ export interface WorkspaceBackupSnapshot {
   briefings?: Array<Omit<MorningBriefing, 'createdAt' | 'updatedAt'>>;
   mailBriefings?: Array<Omit<MailBriefing, 'createdAt' | 'updatedAt'>>;
   circleBriefings?: Array<Omit<CircleBriefing, 'createdAt' | 'updatedAt'>>;
+  // Pass 13 (Jason, 2026-11-21): backup everything means these
+  // too — account records, the credentials box (sealed envelopes
+  // only; a backup never holds a plain password), and the family
+  // directory.
+  accountRecords?: Array<Omit<AccountRecord, 'createdAt' | 'updatedAt'>>;
+  credentials?: Array<Omit<Credential, 'createdAt' | 'updatedAt'>>;
+  directoryEntries?: Array<Omit<DirectoryEntry, 'createdAt' | 'updatedAt'>>;
 }
 
 const DRIVE_FOLDER_NAME = 'Steward Backups';
@@ -233,6 +243,9 @@ export function buildWorkspaceJsonBackup(data: {
   briefings?: MorningBriefing[];
   mailBriefings?: MailBriefing[];
   circleBriefings?: CircleBriefing[];
+  accountRecords?: AccountRecord[];
+  credentials?: Credential[];
+  directoryEntries?: DirectoryEntry[];
 }): string {
   const stripTimestamps = <T extends { createdAt?: unknown; updatedAt?: unknown }>(items: T[]) =>
     items.map(({ createdAt: _c, updatedAt: _u, ...rest }) => rest);
@@ -253,6 +266,9 @@ export function buildWorkspaceJsonBackup(data: {
     ...(data.briefings ? { briefings: stripTimestamps(data.briefings) } : {}),
     ...(data.mailBriefings ? { mailBriefings: stripTimestamps(data.mailBriefings) } : {}),
     ...(data.circleBriefings ? { circleBriefings: stripTimestamps(data.circleBriefings) } : {}),
+    ...(data.accountRecords ? { accountRecords: stripTimestamps(data.accountRecords) } : {}),
+    ...(data.credentials ? { credentials: stripTimestamps(data.credentials) } : {}),
+    ...(data.directoryEntries ? { directoryEntries: stripTimestamps(data.directoryEntries) } : {}),
   };
   return JSON.stringify(snapshot, null, 2);
 }

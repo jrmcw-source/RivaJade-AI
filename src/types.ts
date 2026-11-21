@@ -635,6 +635,15 @@ export interface HouseholdMember {
 // above the households; households link to it, and family-scoped
 // records carry the family roster as their audience. People can be
 // family before they run a household of their own.
+export interface FamilyStorage {
+  rootChoice?: 'default' | 'custom';
+  rootId?: string;
+  rootLabel?: string;
+  backupsEnabled?: boolean;
+  backupFrequency?: 'daily' | 'weekly' | 'manual';
+  backupScope?: 'everything' | 'finances-official' | 'documents';
+}
+
 export interface Family {
   id: string;
   name: string;
@@ -673,6 +682,16 @@ export interface Family {
   // head's own vault key sealed under the family key — the thing a
   // members' vote can hand back after a lost passphrase.
   recovery?: FamilyRecovery;
+  // Storage & backups (Jason, 2026-11-21): the family head's
+  // choices. The default is one host root folder — the Steward
+  // folder the desk sets up — because one root keeps everything
+  // inside the protection, the sharing, and the backup at once;
+  // the files are held in the vault and the tags do the work, so
+  // a record's tier never requires its file to move. A head may
+  // point the desk at a different root folder instead, knowing
+  // what that splits. Backups are the head's toggle: whether they
+  // run, how often, and what they carry.
+  storage?: FamilyStorage;
   // The counted people (Jason, 2026-11-20): the family roster holds
   // people, not just accounts — cousins who never open the app are
   // family too. Headship of the giant circle descends by seniority

@@ -88,6 +88,7 @@ import {
   GiveProposal,
   GiftEntry,
   DirectoryEntry,
+  FamilyStorage,
   ProjectInvite,
   ProjectMember,
   ProjectTask,
@@ -117,6 +118,7 @@ import {
   buildWorkspaceJsonBackup,
   createDriveBackupFile,
   ensureStewardBackupFolder,
+  ensureStewardSubfolder,
   ensureStewardPhotosFolder,
   downloadDriveBackupContent,
   listDriveBackups,
@@ -377,6 +379,14 @@ function MainApp() {
   const [mailFileKind, setMailFileKind] = useState<RecordKind>('personal');
   const [mailFiledIds, setMailFiledIds] = useState<string[]>([]);
   const [mailFileFeedback, setMailFileFeedback] = useState('');
+  const [storageFamilyId, setStorageFamilyId] = useState('');
+  const [stRootChoice, setStRootChoice] = useState<'default' | 'custom'>('default');
+  const [stRootIdText, setStRootIdText] = useState('');
+  const [stRootLabel, setStRootLabel] = useState('');
+  const [stBackupsEnabled, setStBackupsEnabled] = useState(true);
+  const [stFrequency, setStFrequency] = useState<'daily' | 'weekly' | 'manual'>('daily');
+  const [stScope, setStScope] = useState<'everything' | 'finances-official' | 'documents'>('everything');
+  const [stFeedback, setStFeedback] = useState('');
   const [sharedAccountRecords, setSharedAccountRecords] = useState<AccountRecord[]>([]);
   const [acctTitle, setAcctTitle] = useState('');
   const [acctUsername, setAcctUsername] = useState('');
@@ -2276,7 +2286,7 @@ function MainApp() {
     }
     setRecoveryBusy(true);
     try {
-      const folderId = await ensureStewardBackupFolder(token);
+      const folderId = await resolveBackupFolderId(token);
       const files = await listDriveBackups(token, folderId);
       const existing = files.find((f) => f.name === RECOVERY_KEY_FILE_NAME);
       const content = JSON.stringify(
@@ -2328,7 +2338,7 @@ function MainApp() {
     }
     setRecoveryBusy(true);
     try {
-      const folderId = await ensureStewardBackupFolder(token);
+      const folderId = await resolveBackupFolderId(token);
       const files = await listDriveBackups(token, folderId);
       const file = files.find((f) => f.name === RECOVERY_KEY_FILE_NAME);
       if (!file) {
@@ -2916,6 +2926,52 @@ function MainApp() {
       setMailFileFeedback(`Filed. "${entry.subject}" is now a record, ${mailFileScope === 'private' ? 'yours alone' : mailFileScope === 'family' ? 'shared with the family' : 'shared with your household'}.`);
     } catch (err) {
       setMailFileFeedback(err instanceof Error ? err.message : 'That message could not be filed.');
+    }
+  }
+
+
+  function handlePickStorageFamily(familyId: string) {
+    setStorageFamilyId(familyId);
+    const fam = families.find((f) => f.id === familyId);
+    const st = fam?.storage;
+    setStRootChoice(st?.rootChoice === 'custom' ? 'custom' : 'default');
+    setStRootIdText(st?.rootId || '');
+    setStRootLabel(st?.rootLabel || '');
+    setStBackupsEnabled(st?.backupsEnabled !== false);
+    setStFrequency(st?.backupFrequency || 'daily');
+    setStScope(st?.backupScope || 'everything');
+    setStFeedback('');
+  }
+
+  async function handleSaveStorageSettings() {
+    const fam = families.find((f) => f.id === storageFamilyId);
+    if (!fam || !user) {
+      setStFeedback('Pick the family first.');
+      return;
+    }
+    let rootId = stRootIdText.trim();
+    const foldersAt = rootId.indexOf('folders/');
+    if (foldersAt >= 0) rootId = rootId.slice(foldersAt + 'folders/'.length).split(/[/?#]/)[0];
+    const storage: FamilyStorage = {
+      rootChoice: stRootChoice,
+      rootId: stRootChoice === 'custom' ? rootId : '',
+      rootLabel: stRootChoice === 'custom' ? stRootLabel.trim().slice(0, 120) : '',
+      backupsEnabled: stBackupsEnabled,
+      backupFrequency: stFrequency,
+      backupScope: stScope,
+    };
+    if (stRootChoice === 'custom' && !rootId) {
+      setStFeedback('A different root needs its folder ID or its Drive link — or keep the one root folder.');
+      return;
+    }
+    try {
+      await updateDoc(doc(db, 'families', fam.id), {
+        storage,
+        updatedAt: serverTimestamp(),
+      });
+      setStFeedback('Saved. The desk follows these storage and backup choices for this family.');
+    } catch (err) {
+      setStFeedback(err instanceof Error ? err.message : 'The settings could not be saved.');
     }
   }
 
@@ -3739,6 +3795,32 @@ function MainApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [families, user]);
 
+
+  // ---- Storage & backups (Jason, 2026-11-21) ----
+  // The family head's storage choices live on the family record.
+  // One host root folder is the default and the recommendation:
+  // everything the desk holds stays inside one root, so the
+  // protection, the sharing, and the backup all cover all of it
+  // at once. The files are held in the vault and the tags do the
+  // work — a record's tier never requires its file to move.
+
+  function headedFamily(): Family | undefined {
+    if (!user) return undefined;
+    return families.find((f) => f.ownerId === user.uid || familyHeadUid(f) === user.uid);
+  }
+
+  function headedStorage(): FamilyStorage | undefined {
+    return headedFamily()?.storage;
+  }
+
+  async function resolveBackupFolderId(token: string): Promise<string> {
+    const st = headedStorage();
+    if (st?.rootChoice === 'custom' && st.rootId) {
+      return ensureStewardSubfolder(token, st.rootId, 'Steward Backups');
+    }
+    return ensureStewardBackupFolder(token);
+  }
+
   // Backup everything, every day (Jason, 2026-11-21): while Drive
   // is connected, the desk writes one whole-desk snapshot a day to
   // the Steward Backups folder on its own — records, families,
@@ -3760,6 +3842,9 @@ function MainApp() {
     briefings,
     mailBriefings: ownMailBriefings,
     circleBriefings: ownCircleBriefings,
+    accountRecords,
+    credentials,
+    directoryEntries,
   };
   const autoBackupBusyRef = useRef(false);
   useEffect(() => {
@@ -3771,11 +3856,73 @@ function MainApp() {
         if (autoBackupBusyRef.current) return;
         if (localStorage.getItem(key) === localDateKey()) return;
         const token = getDriveAccessToken();
-        const data = autoBackupDataRef.current;
-        if (!token || !data) return;
+        const rawData = autoBackupDataRef.current;
+        if (!token || !rawData) return;
+        // The family head's backup toggle governs the automatic
+        // backups: off means off, manual means the button only,
+        // weekly means a week between snapshots. Families whose
+        // head turned their backups off contribute no records.
+        const myFams = (rawData.families || []).filter(
+          (f) => f.ownerId === user.uid || familyHeadUid(f) === user.uid
+        );
+        const st = myFams.find((f) => f.storage)?.storage;
+        if (st?.backupsEnabled === false || st?.backupFrequency === 'manual') return;
+        if (st?.backupFrequency === 'weekly') {
+          const last = localStorage.getItem(key);
+          if (last) {
+            const days = Math.floor(
+              (new Date(localDateKey()).getTime() - new Date(last).getTime()) / 86400000
+            );
+            if (Number.isFinite(days) && days < 7) return;
+          }
+        }
+        const offFamilyIds = new Set(
+          myFams.filter((f) => f.storage?.backupsEnabled === false).map((f) => f.id)
+        );
+        const dropOff = <T extends { familyId?: string }>(items: T[]): T[] =>
+          items.filter((r) => !r.familyId || !offFamilyIds.has(r.familyId));
+        let data = {
+          ...rawData,
+          tasks: dropOff(rawData.tasks),
+          documents: dropOff(rawData.documents),
+          propertyEntries: dropOff(rawData.propertyEntries),
+          financeEntries: dropOff(rawData.financeEntries),
+          jasonNotes: dropOff(rawData.jasonNotes || []),
+          accountRecords: dropOff(rawData.accountRecords || []),
+          directoryEntries: dropOff(rawData.directoryEntries || []),
+        };
+        if (st?.backupScope === 'documents') {
+          data = {
+            ...data,
+            tasks: [],
+            propertyEntries: [],
+            financeEntries: [],
+            voiceMemories: [],
+            jasonNotes: [],
+            accountRecords: [],
+            credentials: [],
+            directoryEntries: [],
+          };
+        } else if (st?.backupScope === 'finances-official') {
+          data = {
+            ...data,
+            tasks: [],
+            propertyEntries: [],
+            voiceMemories: [],
+            jasonNotes: [],
+            accountRecords: [],
+            directoryEntries: [],
+            documents: data.documents.filter(
+              (d) => d.recordKind === 'official' || d.recordKind === 'financial'
+            ),
+          };
+        }
         autoBackupBusyRef.current = true;
         try {
-          const folderId = await ensureStewardBackupFolder(token);
+          const folderId =
+            st?.rootChoice === 'custom' && st.rootId
+              ? await ensureStewardSubfolder(token, st.rootId, 'Steward Backups')
+              : await ensureStewardBackupFolder(token);
           await createDriveBackupFile(token, {
             folderId,
             name: `steward-auto-backup-${localDateKey()}.json`,
@@ -5048,6 +5195,81 @@ function MainApp() {
         transcriptExcerpt: typeof m.transcriptExcerpt === 'string' ? m.transcriptExcerpt : '',
       });
       importedCount += 1;
+    }
+
+
+    // Pass 13 (Jason, 2026-11-21): a restore restores everything
+    // within its family circle — every document, every category,
+    // every relationship, fit to the tree. What follows brings
+    // back the rest of the desk for the records the restorer owns:
+    // notes, accounts with their credentials, the directory, and
+    // the structure itself — families and circles. Another
+    // member's own records are theirs: they come back on that
+    // member's own device, from the same backup, under their own
+    // sign-in. A restore never writes outside the restorer's own
+    // authority.
+    const existingNoteKeys = new Set(
+      jasonNotes.filter((n) => n.userId === user.uid).map((n) => n.text.trim().toLowerCase())
+    );
+    for (const n of Array.isArray(snapshot.jasonNotes) ? snapshot.jasonNotes : []) {
+      if (n.userId !== user.uid) continue;
+      const text = String(n.text || '').trim();
+      if (!text || existingNoteKeys.has(text.toLowerCase())) continue;
+      existingNoteKeys.add(text.toLowerCase());
+      await handleCreateJasonNote(text, 'assistant');
+      importedCount += 1;
+    }
+
+    const restoreOwnDoc = async (
+      collectionName: string,
+      raw: Record<string, unknown>,
+      ownerValue: unknown
+    ): Promise<boolean> => {
+      if (ownerValue !== user.uid) return false;
+      const id = raw.id;
+      if (typeof id !== 'string' || !id) return false;
+      try {
+        const ref = doc(db, collectionName, id);
+        const existing = await getDoc(ref);
+        if (existing.exists()) return false;
+        const fields: Record<string, unknown> = { ...raw };
+        delete fields.createdAt;
+        delete fields.updatedAt;
+        await setDoc(ref, {
+          ...fields,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    for (const c of Array.isArray(snapshot.credentials) ? snapshot.credentials : []) {
+      if (await restoreOwnDoc('credentials', c as Record<string, unknown>, (c as { ownerId?: string }).ownerId)) {
+        importedCount += 1;
+      }
+    }
+    for (const a of Array.isArray(snapshot.accountRecords) ? snapshot.accountRecords : []) {
+      if (await restoreOwnDoc('accountRecords', a as Record<string, unknown>, (a as { userId?: string }).userId)) {
+        importedCount += 1;
+      }
+    }
+    for (const d of Array.isArray(snapshot.directoryEntries) ? snapshot.directoryEntries : []) {
+      if (await restoreOwnDoc('directoryEntries', d as Record<string, unknown>, (d as { userId?: string }).userId)) {
+        importedCount += 1;
+      }
+    }
+    for (const f of Array.isArray(snapshot.families) ? snapshot.families : []) {
+      if (await restoreOwnDoc('families', f as Record<string, unknown>, (f as { ownerId?: string }).ownerId)) {
+        importedCount += 1;
+      }
+    }
+    for (const c of Array.isArray(snapshot.circles) ? snapshot.circles : []) {
+      if (await restoreOwnDoc('circles', c as Record<string, unknown>, (c as { ownerId?: string }).ownerId)) {
+        importedCount += 1;
+      }
     }
 
     return { importedCount };
@@ -6795,6 +7017,140 @@ function MainApp() {
 
             <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                Storage & backups
+              </h3>
+              <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                The family head chooses where this family's records are stored. The desk's
+                own answer — and the common, safe one — is one host root folder: the
+                Steward folder it sets up in Drive. One root keeps everything inside the
+                protection, the sharing, and the backup at once, and there is one place
+                to guard. The files are held in the vault and the tags do the work, so a
+                record moving between private, household, and family never needs its
+                file to move at all. A different root is allowed, with open eyes: what
+                sits outside the root sits outside the desk's backup and protection, and
+                anyone you share the folder with can see what is in it.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                  <span>Family:</span>
+                  <select
+                    value={storageFamilyId}
+                    onChange={(e) => handlePickStorageFamily(e.target.value)}
+                    className="min-h-[34px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                  >
+                    <option value="">Pick the family</option>
+                    {families
+                      .filter((f) => user && (f.ownerId === user.uid || familyHeadUid(f) === user.uid))
+                      .map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              </div>
+              {storageFamilyId && (
+                <div className="space-y-2">
+                  <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400">
+                    <input
+                      type="radio"
+                      name="storage-root"
+                      checked={stRootChoice === 'default'}
+                      onChange={() => setStRootChoice('default')}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      One root folder — the Steward folder the desk sets up (recommended).
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400">
+                    <input
+                      type="radio"
+                      name="storage-root"
+                      checked={stRootChoice === 'custom'}
+                      onChange={() => setStRootChoice('custom')}
+                      className="mt-0.5"
+                    />
+                    <span>A different root folder I choose.</span>
+                  </label>
+                  {stRootChoice === 'custom' && (
+                    <div className="space-y-2 pl-5">
+                      <input
+                        type="text"
+                        value={stRootIdText}
+                        onChange={(e) => setStRootIdText(e.target.value)}
+                        placeholder="The folder's Drive link or its folder ID"
+                        className="w-full min-h-[36px] px-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                      />
+                      <input
+                        type="text"
+                        value={stRootLabel}
+                        onChange={(e) => setStRootLabel(e.target.value)}
+                        placeholder="What the family calls it (optional)"
+                        className="w-full min-h-[36px] px-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                      />
+                    </div>
+                  )}
+                  <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400 pt-1">
+                    <input
+                      type="checkbox"
+                      checked={stBackupsEnabled}
+                      onChange={(e) => setStBackupsEnabled(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      Automatic backups for this family. The Backups button always works
+                      either way — this switch governs the ones the desk makes on its own.
+                    </span>
+                  </label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                      <span>How often:</span>
+                      <select
+                        value={stFrequency}
+                        onChange={(e) => setStFrequency(e.target.value as 'daily' | 'weekly' | 'manual')}
+                        className="min-h-[34px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                      >
+                        <option value="daily">Every day</option>
+                        <option value="weekly">Every week</option>
+                        <option value="manual">Only when I press the button</option>
+                      </select>
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                      <span>What they carry:</span>
+                      <select
+                        value={stScope}
+                        onChange={(e) => setStScope(e.target.value as 'everything' | 'finances-official' | 'documents')}
+                        className="min-h-[34px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                      >
+                        <option value="everything">Everything</option>
+                        <option value="finances-official">Finances & official papers</option>
+                        <option value="documents">Documents only</option>
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveStorageSettings()}
+                      className="min-h-[34px] px-3 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-md"
+                    >
+                      Save storage choices
+                    </button>
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+                    A restore brings back everything within the family circle — every
+                    document, every category, every relationship — for the records you
+                    own. Another member's own records restore on their own device, from
+                    the same backup, under their own sign-in.
+                  </p>
+                  {stFeedback && (
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">{stFeedback}</p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
                 The assistant
               </h3>
               <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
@@ -7819,6 +8175,12 @@ function MainApp() {
 
       {/* Google Drive Backup Modal */}
       <GoogleDriveBackupModal
+        accountRecords={accountRecords}
+        credentials={credentials}
+        directoryEntries={directoryEntries}
+        storageRootParentId={
+          headedStorage()?.rootChoice === 'custom' ? headedStorage()?.rootId || '' : ''
+        }
         open={driveBackupOpen}
         onClose={() => setDriveBackupOpen(false)}
         tasks={tasks}
