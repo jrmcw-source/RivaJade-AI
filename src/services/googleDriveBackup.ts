@@ -4,6 +4,7 @@ import {
   CircleBriefing,
   Credential,
   DirectoryEntry,
+  EmergencySheet,
   Family,
   FinanceEntry,
   Household,
@@ -55,6 +56,7 @@ export interface WorkspaceBackupSnapshot {
   accountRecords?: Array<Omit<AccountRecord, 'createdAt' | 'updatedAt'>>;
   credentials?: Array<Omit<Credential, 'createdAt' | 'updatedAt'>>;
   directoryEntries?: Array<Omit<DirectoryEntry, 'createdAt' | 'updatedAt'>>;
+  emergencySheets?: Array<Omit<EmergencySheet, 'createdAt' | 'updatedAt'>>;
 }
 
 const DRIVE_FOLDER_NAME = 'Steward Backups';
@@ -246,6 +248,7 @@ export function buildWorkspaceJsonBackup(data: {
   accountRecords?: AccountRecord[];
   credentials?: Credential[];
   directoryEntries?: DirectoryEntry[];
+  emergencySheets?: EmergencySheet[];
 }): string {
   const stripTimestamps = <T extends { createdAt?: unknown; updatedAt?: unknown }>(items: T[]) =>
     items.map(({ createdAt: _c, updatedAt: _u, ...rest }) => rest);
@@ -269,6 +272,7 @@ export function buildWorkspaceJsonBackup(data: {
     ...(data.accountRecords ? { accountRecords: stripTimestamps(data.accountRecords) } : {}),
     ...(data.credentials ? { credentials: stripTimestamps(data.credentials) } : {}),
     ...(data.directoryEntries ? { directoryEntries: stripTimestamps(data.directoryEntries) } : {}),
+    ...(data.emergencySheets ? { emergencySheets: stripTimestamps(data.emergencySheets) } : {}),
   };
   return JSON.stringify(snapshot, null, 2);
 }

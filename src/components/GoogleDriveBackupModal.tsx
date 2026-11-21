@@ -28,6 +28,7 @@ import {
   ScheduleTask,
   VoiceMemory,
   getLocalTodayIso,
+  EmergencySheet,
 } from '../types';
 import {
   clearDriveAccessToken,
@@ -85,6 +86,7 @@ interface GoogleDriveBackupModalProps {
   accountRecords?: AccountRecord[];
   credentials?: Credential[];
   directoryEntries?: DirectoryEntry[];
+  emergencySheets?: EmergencySheet[];
   // The family head's chosen root folder, when it is not the
   // desk's own (Jason, 2026-11-21): backups live under it.
   storageRootParentId?: string;
@@ -138,6 +140,7 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
   accountRecords,
   credentials,
   directoryEntries,
+  emergencySheets,
   storageRootParentId,
   onRestoreSnapshot,
   onLinkDocumentPhoto,
@@ -223,6 +226,7 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
           accountRecords,
           credentials,
           directoryEntries,
+          emergencySheets,
         }),
       };
     }

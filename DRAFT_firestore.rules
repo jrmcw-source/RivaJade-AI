@@ -1151,7 +1151,7 @@ service cloud.firestore {
         && isBoundedStringList(data.memberIds, 100, 128)
         && data.memberIds.size() >= 1
         && data.ownerId in data.memberIds
-        && (!('people' in data) || (data.people is list && data.people.size() <= 100))
+        && (!('people' in data) || (data.people is list && data.people.size() <= 1000))
         && (!('headMode' in data) || data.headMode in ['seniority', 'chosen'])
         && (!('headNames' in data) || isBoundedStringList(data.headNames, 2, 120))
         && (!('responsibleAge' in data)
@@ -1328,6 +1328,55 @@ service cloud.firestore {
         && (!('birthday' in data) || (data.birthday is string && data.birthday.size() <= 10))
         && (!('anniversary' in data) || (data.anniversary is string && data.anniversary.size() <= 10))
         && (!('anniversaryLabel' in data) || (data.anniversaryLabel is string && data.anniversaryLabel.size() <= 80))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidEmergencySheet(data) {
+      return data.keys().hasAll([
+          'userId',
+          'householdId',
+          'memberIds',
+          'forName',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId',
+          'householdId',
+          'memberIds',
+          'scope',
+          'familyId',
+          'circleIds',
+          'forName',
+          'contacts',
+          'doctors',
+          'allergies',
+          'medicationsNote',
+          'bloodType',
+          'conditionsNote',
+          'wishes',
+          'notes',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.userId is string
+        && isValidId(data.userId)
+        && isValidHouseholdStamp(data, 'other')
+        && (!('scope' in data) || data.scope in ['private', 'household', 'family', 'circles'])
+        && (!('familyId' in data) || (data.familyId is string && data.familyId.size() <= 128))
+        && (!('circleIds' in data) || isBoundedStringList(data.circleIds, 4, 128))
+        && data.forName is string
+        && data.forName.size() >= 1
+        && data.forName.size() <= 120
+        && (!('contacts' in data) || (data.contacts is string && data.contacts.size() <= 2000))
+        && (!('doctors' in data) || (data.doctors is string && data.doctors.size() <= 1000))
+        && (!('allergies' in data) || (data.allergies is string && data.allergies.size() <= 1000))
+        && (!('medicationsNote' in data) || (data.medicationsNote is string && data.medicationsNote.size() <= 2000))
+        && (!('bloodType' in data) || (data.bloodType is string && data.bloodType.size() <= 20))
+        && (!('conditionsNote' in data) || (data.conditionsNote is string && data.conditionsNote.size() <= 2000))
+        && (!('wishes' in data) || (data.wishes is string && data.wishes.size() <= 2000))
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 2000))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -1829,6 +1878,9 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'displayName',
+          'birthday',
+          'anniversary',
+          'anniversaryLabel',
           'physicalAddress',
           'billingAddress',
           'phones',
@@ -1841,6 +1893,44 @@ service cloud.firestore {
           'updatedAt'
         ]);
       allow delete: if isVerifiedUser() && isValidId(entryId)
+        && existing().userId == request.auth.uid;
+    }
+
+    match /emergencySheets/{sheetId} {
+      allow get: if isSignedIn() && isValidId(sheetId) && canAccessRecord();
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || request.auth.uid in resource.data.get('memberIds', []));
+      allow create: if isVerifiedUser()
+        && isValidId(sheetId)
+        && isValidEmergencySheet(incoming())
+        && incoming().userId == request.auth.uid
+        && (incoming().householdId == '' || isHouseholdMember(incoming().householdId))
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(sheetId)
+        && isValidEmergencySheet(incoming())
+        && existing().userId == request.auth.uid
+        && incoming().userId == existing().userId
+        && incoming().householdId == existing().householdId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'forName',
+          'contacts',
+          'doctors',
+          'allergies',
+          'medicationsNote',
+          'bloodType',
+          'conditionsNote',
+          'wishes',
+          'notes',
+          'memberIds',
+          'scope',
+          'familyId',
+          'circleIds',
+          'updatedAt'
+        ]);
+      allow delete: if isVerifiedUser() && isValidId(sheetId)
         && existing().userId == request.auth.uid;
     }
 

@@ -89,6 +89,7 @@ import {
   GiveProposal,
   GiftEntry,
   DirectoryEntry,
+  EmergencySheet,
   FamilyStorage,
   ProjectInvite,
   ProjectMember,
@@ -363,6 +364,8 @@ function MainApp() {
   const [giveTarget, setGiveTarget] = useState('');
   const [giveFeedback, setGiveFeedback] = useState('');
   const [ownDirectoryEntries, setOwnDirectoryEntries] = useState<DirectoryEntry[]>([]);
+  const [ownEmergencySheets, setOwnEmergencySheets] = useState<EmergencySheet[]>([]);
+  const [sharedEmergencySheets, setSharedEmergencySheets] = useState<EmergencySheet[]>([]);
   const [sharedDirectoryEntries, setSharedDirectoryEntries] = useState<DirectoryEntry[]>([]);
   const [dirName, setDirName] = useState('');
   const [dirBirthday, setDirBirthday] = useState('');
@@ -383,6 +386,18 @@ function MainApp() {
   const [mailFileKind, setMailFileKind] = useState<RecordKind>('personal');
   const [mailFiledIds, setMailFiledIds] = useState<string[]>([]);
   const [mailFileFeedback, setMailFileFeedback] = useState('');
+  const [sheetForName, setSheetForName] = useState('');
+  const [sheetContacts, setSheetContacts] = useState('');
+  const [sheetDoctors, setSheetDoctors] = useState('');
+  const [sheetAllergies, setSheetAllergies] = useState('');
+  const [sheetMedications, setSheetMedications] = useState('');
+  const [sheetBloodType, setSheetBloodType] = useState('');
+  const [sheetConditions, setSheetConditions] = useState('');
+  const [sheetWishes, setSheetWishes] = useState('');
+  const [sheetNotes, setSheetNotes] = useState('');
+  const [sheetScope, setSheetScope] = useState<'private' | 'household' | 'family'>('household');
+  const [sheetFamilyId, setSheetFamilyId] = useState('');
+  const [sheetFeedback, setSheetFeedback] = useState('');
   const [storageFamilyId, setStorageFamilyId] = useState('');
   const [stRootChoice, setStRootChoice] = useState<'default' | 'custom'>('default');
   const [stRootIdText, setStRootIdText] = useState('');
@@ -698,6 +713,28 @@ function MainApp() {
       (err) => handleFirestoreError(err, OperationType.LIST, 'directoryEntries')
     );
 
+    const unsubSheetOwn = onSnapshot(
+      query(collection(db, 'emergencySheets'), where('userId', '==', user.uid)),
+      (snap) => {
+        setOwnEmergencySheets(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<EmergencySheet, 'id'>) }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'emergencySheets')
+    );
+
+    const unsubSheetShared = onSnapshot(
+      query(collection(db, 'emergencySheets'), where('memberIds', 'array-contains', user.uid)),
+      (snap) => {
+        setSharedEmergencySheets(
+          snap.docs
+            .map((d) => ({ id: d.id, ...(d.data() as Omit<EmergencySheet, 'id'>) }))
+            .filter((e) => e.userId !== user.uid)
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'emergencySheets')
+    );
+
     const unsubMemories = onSnapshot(
       query(collection(db, 'voiceMemories'), where('userId', '==', user.uid)),
       (snap) => {
@@ -974,6 +1011,8 @@ function MainApp() {
       unsubGiveOwn();
       unsubGiveForMe();
       unsubDirOwn();
+      unsubSheetOwn();
+      unsubSheetShared();
       unsubDirShared();
       unsubMemories();
       unsubJasonNotes();
@@ -1175,6 +1214,11 @@ function MainApp() {
   const directoryEntries = useMemo(
     () => mergeRecordsById(ownDirectoryEntries, sharedDirectoryEntries),
     [ownDirectoryEntries, sharedDirectoryEntries]
+  );
+
+  const emergencySheets = useMemo(
+    () => mergeRecordsById(ownEmergencySheets, sharedEmergencySheets),
+    [ownEmergencySheets, sharedEmergencySheets]
   );
 
   const propertyEntries = useMemo(
@@ -3807,6 +3851,71 @@ function MainApp() {
   }, [families, user]);
 
 
+
+  function handleLoadOwnSheet() {
+    const mine = ownEmergencySheets[0];
+    if (!mine) {
+      setSheetFeedback('No sheet of yours is on file yet — the form below starts one.');
+      return;
+    }
+    setSheetForName(mine.forName || '');
+    setSheetContacts(mine.contacts || '');
+    setSheetDoctors(mine.doctors || '');
+    setSheetAllergies(mine.allergies || '');
+    setSheetMedications(mine.medicationsNote || '');
+    setSheetBloodType(mine.bloodType || '');
+    setSheetConditions(mine.conditionsNote || '');
+    setSheetWishes(mine.wishes || '');
+    setSheetNotes(mine.notes || '');
+    setSheetScope(mine.scope === 'private' || mine.scope === 'family' ? mine.scope : 'household');
+    setSheetFamilyId(mine.familyId || '');
+    setSheetFeedback('Your sheet is loaded below. Saving replaces it.');
+  }
+
+  async function handleSaveEmergencySheet() {
+    if (!user) return;
+    const forName = sheetForName.trim();
+    if (!forName) {
+      setSheetFeedback('The sheet needs the name responders will know.');
+      return;
+    }
+    const memberIds = audienceFor(sheetScope, sheetFamilyId, [], activeHousehold?.householdId || '', 'documents');
+    const payload: Record<string, unknown> = {
+      forName,
+      contacts: sheetContacts.trim(),
+      doctors: sheetDoctors.trim(),
+      allergies: sheetAllergies.trim(),
+      medicationsNote: sheetMedications.trim(),
+      bloodType: sheetBloodType.trim(),
+      conditionsNote: sheetConditions.trim(),
+      wishes: sheetWishes.trim(),
+      notes: sheetNotes.trim(),
+      scope: sheetScope,
+      familyId: sheetScope === 'family' ? sheetFamilyId : '',
+      circleIds: [],
+      memberIds,
+      updatedAt: serverTimestamp(),
+    };
+    try {
+      const mine = ownEmergencySheets[0];
+      if (mine) {
+        await updateDoc(doc(db, 'emergencySheets', mine.id), payload);
+        setSheetFeedback('Your emergency sheet is updated.');
+      } else {
+        const id = createSafeId('emg');
+        await setDoc(doc(db, 'emergencySheets', id), {
+          ...payload,
+          userId: user.uid,
+          householdId: activeHousehold?.householdId || '',
+          createdAt: serverTimestamp(),
+        });
+        setSheetFeedback('Your emergency sheet is on file, at the reach you picked.');
+      }
+    } catch (err) {
+      setSheetFeedback(err instanceof Error ? err.message : 'The sheet could not be saved.');
+    }
+  }
+
   // ---- Storage & backups (Jason, 2026-11-21) ----
   // The family head's storage choices live on the family record.
   // One host root folder is the default and the recommendation:
@@ -3856,6 +3965,7 @@ function MainApp() {
     accountRecords,
     credentials,
     directoryEntries,
+    emergencySheets,
   };
   const autoBackupBusyRef = useRef(false);
   useEffect(() => {
@@ -3901,6 +4011,7 @@ function MainApp() {
           jasonNotes: dropOff(rawData.jasonNotes || []),
           accountRecords: dropOff(rawData.accountRecords || []),
           directoryEntries: dropOff(rawData.directoryEntries || []),
+          emergencySheets: dropOff(rawData.emergencySheets || []),
         };
         if (st?.backupScope === 'documents') {
           data = {
@@ -3913,6 +4024,7 @@ function MainApp() {
             accountRecords: [],
             credentials: [],
             directoryEntries: [],
+            emergencySheets: [],
           };
         } else if (st?.backupScope === 'finances-official') {
           data = {
@@ -3923,6 +4035,7 @@ function MainApp() {
             jasonNotes: [],
             accountRecords: [],
             directoryEntries: [],
+            emergencySheets: [],
             documents: data.documents.filter(
               (d) => d.recordKind === 'official' || d.recordKind === 'financial'
             ),
@@ -5269,6 +5382,11 @@ function MainApp() {
     }
     for (const d of Array.isArray(snapshot.directoryEntries) ? snapshot.directoryEntries : []) {
       if (await restoreOwnDoc('directoryEntries', d as Record<string, unknown>, (d as { userId?: string }).userId)) {
+        importedCount += 1;
+      }
+    }
+    for (const sh of Array.isArray(snapshot.emergencySheets) ? snapshot.emergencySheets : []) {
+      if (await restoreOwnDoc('emergencySheets', sh as Record<string, unknown>, (sh as { userId?: string }).userId)) {
         importedCount += 1;
       }
     }
@@ -7097,6 +7215,182 @@ function MainApp() {
 
             <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                Emergency sheet
+              </h3>
+              <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                One sheet per person, in your own words, for the day somebody needs it
+                fast: who to call, who your doctors are, what the people helping you
+                should know. You choose how far it reaches, like everything else on the
+                desk. The desk holds the sheet exactly as you wrote it — it does not
+                give medical advice, and it never changes a word.
+              </p>
+              <div className="space-y-2">
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    type="text"
+                    value={sheetForName}
+                    onChange={(e) => setSheetForName(e.target.value)}
+                    placeholder="Your name, as responders know it"
+                    className="flex-1 min-w-[200px] min-h-[38px] px-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                  />
+                  <input
+                    type="text"
+                    value={sheetBloodType}
+                    onChange={(e) => setSheetBloodType(e.target.value)}
+                    placeholder="Blood type (if you want it on the sheet)"
+                    className="w-[190px] min-h-[38px] px-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                  />
+                </div>
+                <textarea
+                  value={sheetContacts}
+                  onChange={(e) => setSheetContacts(e.target.value)}
+                  placeholder={'Who to call — one per line\nName — relation — phone'}
+                  rows={3}
+                  className="w-full px-2.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                />
+                <textarea
+                  value={sheetDoctors}
+                  onChange={(e) => setSheetDoctors(e.target.value)}
+                  placeholder={'Your doctors and clinic — one per line\nName — practice — phone'}
+                  rows={2}
+                  className="w-full px-2.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                />
+                <textarea
+                  value={sheetAllergies}
+                  onChange={(e) => setSheetAllergies(e.target.value)}
+                  placeholder="Allergies — medicines, foods, anything that matters"
+                  rows={2}
+                  className="w-full px-2.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                />
+                <textarea
+                  value={sheetMedications}
+                  onChange={(e) => setSheetMedications(e.target.value)}
+                  placeholder="Medicines you take — in your own words, names and when you take them"
+                  rows={2}
+                  className="w-full px-2.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                />
+                <textarea
+                  value={sheetConditions}
+                  onChange={(e) => setSheetConditions(e.target.value)}
+                  placeholder="Conditions the people helping you should know about"
+                  rows={2}
+                  className="w-full px-2.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                />
+                <textarea
+                  value={sheetWishes}
+                  onChange={(e) => setSheetWishes(e.target.value)}
+                  placeholder="What you want done — your wishes, your words"
+                  rows={2}
+                  className="w-full px-2.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                />
+                <textarea
+                  value={sheetNotes}
+                  onChange={(e) => setSheetNotes(e.target.value)}
+                  placeholder="Anything else that belongs on the sheet"
+                  rows={2}
+                  className="w-full px-2.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                    <span>Who can see it:</span>
+                    <select
+                      value={sheetScope}
+                      onChange={(e) => setSheetScope(e.target.value as 'private' | 'household' | 'family')}
+                      className="min-h-[34px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                    >
+                      <option value="private">Just me</option>
+                      <option value="household">My household</option>
+                      <option value="family">The family</option>
+                    </select>
+                  </label>
+                  {sheetScope === 'family' && (
+                    <select
+                      value={sheetFamilyId}
+                      onChange={(e) => setSheetFamilyId(e.target.value)}
+                      className="min-h-[34px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                    >
+                      <option value="">Pick the family</option>
+                      {families.map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveEmergencySheet()}
+                    className="min-h-[34px] px-3 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-md"
+                  >
+                    Save my sheet
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleLoadOwnSheet()}
+                    className="min-h-[34px] px-3 text-xs font-medium text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-900 rounded-md"
+                  >
+                    Load my sheet into the form
+                  </button>
+                </div>
+                {sheetFeedback && (
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">{sheetFeedback}</p>
+                )}
+              </div>
+              {emergencySheets.length > 0 && (
+                <div className="space-y-2">
+                  {emergencySheets.map((sh) => (
+                    <div
+                      key={sh.id}
+                      className="px-3 py-2 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 rounded-lg"
+                    >
+                      <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                        {sh.forName}
+                        {sh.bloodType ? ` · Blood type ${sh.bloodType}` : ''}
+                        {user && sh.userId === user.uid ? ' · yours' : ''}
+                      </p>
+                      {sh.contacts && (
+                        <p className="text-xs whitespace-pre-line text-slate-600 dark:text-slate-300 mt-1">
+                          <span className="font-medium">Call:</span> {sh.contacts}
+                        </p>
+                      )}
+                      {sh.doctors && (
+                        <p className="text-xs whitespace-pre-line text-slate-600 dark:text-slate-300 mt-1">
+                          <span className="font-medium">Doctors:</span> {sh.doctors}
+                        </p>
+                      )}
+                      {sh.allergies && (
+                        <p className="text-xs whitespace-pre-line text-slate-600 dark:text-slate-300 mt-1">
+                          <span className="font-medium">Allergies:</span> {sh.allergies}
+                        </p>
+                      )}
+                      {sh.medicationsNote && (
+                        <p className="text-xs whitespace-pre-line text-slate-600 dark:text-slate-300 mt-1">
+                          <span className="font-medium">Medicines:</span> {sh.medicationsNote}
+                        </p>
+                      )}
+                      {sh.conditionsNote && (
+                        <p className="text-xs whitespace-pre-line text-slate-600 dark:text-slate-300 mt-1">
+                          <span className="font-medium">Know:</span> {sh.conditionsNote}
+                        </p>
+                      )}
+                      {sh.wishes && (
+                        <p className="text-xs whitespace-pre-line text-slate-600 dark:text-slate-300 mt-1">
+                          <span className="font-medium">Wishes:</span> {sh.wishes}
+                        </p>
+                      )}
+                      {sh.notes && (
+                        <p className="text-xs whitespace-pre-line text-slate-600 dark:text-slate-300 mt-1">
+                          {sh.notes}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
                 Storage & backups
               </h3>
               {families
@@ -8339,6 +8633,7 @@ function MainApp() {
         accountRecords={accountRecords}
         credentials={credentials}
         directoryEntries={directoryEntries}
+        emergencySheets={emergencySheets}
         storageRootParentId={
           headedStorage()?.rootChoice === 'custom' ? headedStorage()?.rootId || '' : ''
         }

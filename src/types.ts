@@ -838,6 +838,31 @@ export function upcomingOccasions(entries: DirectoryEntry[], withinDays = 60): O
   return out;
 }
 
+export interface EmergencySheet {
+  id: string;
+  userId: string;
+  householdId: string;
+  memberIds: string[];
+  scope?: 'private' | 'household' | 'family';
+  familyId?: string;
+  circleIds?: string[];
+  // The sheet is the person's own words, held by the desk for
+  // the day somebody needs it fast: who to call, who their
+  // doctors are, what responders should know. The desk holds the
+  // sheet; it never advises on medical matters.
+  forName: string;
+  contacts?: string;
+  doctors?: string;
+  allergies?: string;
+  medicationsNote?: string;
+  bloodType?: string;
+  conditionsNote?: string;
+  wishes?: string;
+  notes?: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
 export interface AccountRecord {
   id: string;
   userId: string;
