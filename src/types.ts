@@ -197,14 +197,15 @@ export function isPlaceName(value: unknown): value is PlaceName {
   return typeof value === 'string' && (PLACES as readonly string[]).includes(value);
 }
 // Record kinds (Jason, 2026-11-21): the rigid list. A record is
-// Financial, Medical, a Calendar Event, Personal, or Customizable
+// Financial, Medical, a Calendar Event, Personal, Customizable,
+// or Official
 // — the family's own kind, named in customKindLabel. Two kinds are
 // rigid by nature: money records are Financial and tasks are
 // Calendar Events. Papers and property records carry the filing
 // choice, and Personal is the default. The topic categories above
 // keep doing the fine sorting underneath (a doctor's visit is a
 // Calendar Event whose topic is Health & Medical).
-export type RecordKind = 'financial' | 'medical' | 'calendar' | 'personal' | 'custom';
+export type RecordKind = 'financial' | 'medical' | 'calendar' | 'personal' | 'custom' | 'official';
 
 export const RECORD_KIND_LABELS: Record<RecordKind, string> = {
   financial: 'Financial',
@@ -212,6 +213,7 @@ export const RECORD_KIND_LABELS: Record<RecordKind, string> = {
   calendar: 'Calendar Event',
   personal: 'Personal',
   custom: 'Customizable',
+  official: 'Official',
 };
 
 // The kind a stored record carries, by where it lives: the rigid
@@ -223,6 +225,17 @@ export function effectiveRecordKind(
   if (coll === 'tasks') return 'calendar';
   if (coll === 'finances') return 'financial';
   return rec.recordKind || 'personal';
+}
+
+// Which kinds are sealed — encrypted on the device before storage
+// (Jason, 2026-11-21): Official is sealed from the start; every other
+// kind can be switched on or off in Settings. The profile keeps the
+// owner's list; absent a list, Official alone is sealed. Filing a
+// record of a sealed kind requires the vault to be unlocked, and the
+// record carries encrypted: true with its text fields as sealed
+// envelopes (see services/vault.ts).
+export function effectiveSealedKinds(profile: { sealedKinds?: RecordKind[] } | null | undefined): RecordKind[] {
+  return profile?.sealedKinds ?? ['official'];
 }
 
 export type TaskType = 'task' | 'appointment';
@@ -268,6 +281,14 @@ export interface UserProfile {
   mailNewsletters?: boolean;
   mailOnlySenders?: string;
   mailNeverSenders?: string;
+  // The sealed-records vault (Jason, 2026-11-21): a random salt and a
+  // sealed check value for the owner's passphrase. The passphrase and
+  // the key are never stored — the key lives in memory only while
+  // the vault is unlocked. sealedKinds is the owner's list of record
+  // kinds filed sealed; absent, Official alone (effectiveSealedKinds).
+  vaultSalt?: string;
+  vaultCheck?: string;
+  sealedKinds?: RecordKind[];
   createdAt?: unknown;
   updatedAt?: unknown;
 }
@@ -297,6 +318,7 @@ export interface ScheduleTask {
   priority: TaskPriority;
   notes: string;
   helpSteps: string[];
+  encrypted?: boolean;
   linkedDocumentId: string;
   completedAtIso: string;
   completionState?: TaskCompletionState;
@@ -325,6 +347,7 @@ export interface ScannedDocument {
   // (named in customKindLabel). Absent means Personal.
   recordKind?: RecordKind;
   customKindLabel?: string;
+  encrypted?: boolean;
   title: string;
   category: Category;
   place: string;
@@ -780,6 +803,7 @@ export interface PropertyEntry {
   // (named in customKindLabel). Absent means Personal.
   recordKind?: RecordKind;
   customKindLabel?: string;
+  encrypted?: boolean;
   area: PropertyEntryArea;
   place: string;
   title: string;
@@ -879,6 +903,7 @@ export interface FinanceEntry {
   place: string;
   careForJason: boolean;
   notes: string;
+  encrypted?: boolean;
   linkedDocumentId: string;
   createdAt?: unknown;
   updatedAt?: unknown;

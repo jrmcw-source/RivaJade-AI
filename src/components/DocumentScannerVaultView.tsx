@@ -401,6 +401,8 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
       });
       setSelectedDocId(newDocId);
       closeScanner();
+    } catch (err) {
+      setOcrError(err instanceof Error ? err.message : 'That paper could not be filed.');
     } finally {
       setSavingDoc(false);
     }
@@ -594,6 +596,11 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
                       <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 truncate">
                         {highlightMatch(docItem.title, searchQuery)}
                       </h3>
+                      {docItem.encrypted && (
+                        <p className="text-xs font-medium text-teal-700 dark:text-teal-400">
+                          Sealed
+                        </p>
+                      )}
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-slate-500 dark:text-slate-400 tabular-nums">
                         <span>{docItem.category}</span>
                         {docItem.place && (
@@ -672,6 +679,14 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            {selectedDoc.encrypted && (
+              <p className="text-xs text-teal-700 dark:text-teal-400">
+                This record is sealed. Its words can be read and changed only while
+                your vault is unlocked — unlock it in Settings. The title, kind,
+                place, and dates stay visible, like the writing on an envelope.
+              </p>
+            )}
 
             {selectedDoc.imageUrl && (
               <div className="rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950 max-h-64 flex items-center justify-center">

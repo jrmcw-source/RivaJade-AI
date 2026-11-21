@@ -254,6 +254,9 @@ service cloud.firestore {
           'mailNewsletters',
           'mailOnlySenders',
           'mailNeverSenders',
+          'vaultSalt',
+          'vaultCheck',
+          'sealedKinds',
           'createdAt',
           'updatedAt'
         ])
@@ -284,7 +287,10 @@ service cloud.firestore {
         && data.prefersQuickWinsFirst is bool
         && isBoundedStringList(data.behaviorSignals, 30, 300)
         && data.createdAt is timestamp
-        && data.updatedAt is timestamp;
+        && data.updatedAt is timestamp
+        && (!('vaultSalt' in data) || (data.vaultSalt is string && data.vaultSalt.size() <= 64))
+        && (!('vaultCheck' in data) || (data.vaultCheck is string && data.vaultCheck.size() <= 400))
+        && (!('sealedKinds' in data) || isBoundedStringList(data.sealedKinds, 6, 20));
     }
 
     function isValidUserPrivateInfo(data) {
@@ -359,6 +365,7 @@ service cloud.firestore {
                     'scope',
           'familyId',
           'circleIds',
+          'encrypted',
           'createdAt',
           'updatedAt'
         ])
@@ -392,7 +399,7 @@ service cloud.firestore {
         && data.status in ['pending', 'completed']
         && data.priority in ['low', 'medium', 'high']
         && data.notes is string
-        && data.notes.size() <= 2000
+        && data.notes.size() <= 3000
         && isBoundedStringList(data.helpSteps, 15, 400)
         && data.linkedDocumentId is string
         && data.get('place', '') is string
@@ -404,7 +411,8 @@ service cloud.firestore {
         && data.completedAtIso is string
         && data.completedAtIso.size() <= 40
         && data.createdAt is timestamp
-        && data.updatedAt is timestamp;
+        && data.updatedAt is timestamp
+        && (!('encrypted' in data) || data.encrypted is bool);
     }
 
     function isValidScannedDocument(data) {
@@ -452,6 +460,7 @@ service cloud.firestore {
                     'scope',
           'familyId',
           'circleIds',
+          'encrypted',
           'recordKind',
           'customKindLabel',
           'createdAt',
@@ -466,7 +475,7 @@ service cloud.firestore {
         && isValidHouseholdStamp(data, 'other')
         && (!('scope' in data) || data.scope in ['private', 'household', 'family', 'circles'])
         && (!('familyId' in data) || (data.familyId is string && data.familyId.size() <= 128))
-        && (!('recordKind' in data) || data.recordKind in ['financial', 'medical', 'calendar', 'personal', 'custom'])
+        && (!('recordKind' in data) || data.recordKind in ['financial', 'medical', 'calendar', 'personal', 'custom', 'official'])
         && (!('customKindLabel' in data) || (data.customKindLabel is string && data.customKindLabel.size() <= 60))
         && (!('circleIds' in data) || isBoundedStringList(data.circleIds, 4, 128))
         && data.title is string
@@ -476,9 +485,9 @@ service cloud.firestore {
         && data.ocrText is string
         && data.ocrText.size() <= 100000
         && data.summary is string
-        && data.summary.size() <= 1000
+        && data.summary.size() <= 1600
         && isBoundedStringList(data.tags, 20, 40)
-        && isBoundedStringList(data.keyDetails, 25, 240)
+        && isBoundedStringList(data.keyDetails, 25, 400)
         && data.detectedDate is string
         && data.detectedDate.size() <= 20
         && data.imageUrl is string
@@ -486,7 +495,7 @@ service cloud.firestore {
         && data.fileName is string
         && data.fileName.size() <= 200
         && data.notes is string
-        && data.notes.size() <= 2000
+        && data.notes.size() <= 3000
         && data.verificationStatus in ['provisional', 'verified']
         && data.verifiedByName is string
         && data.verifiedByName.size() <= 120
@@ -500,7 +509,8 @@ service cloud.firestore {
         && data.get('place', '').size() <= 60
         && data.get('driveFileId', '').size() <= 128
         && data.createdAt is timestamp
-        && data.updatedAt is timestamp;
+        && data.updatedAt is timestamp
+        && (!('encrypted' in data) || data.encrypted is bool);
     }
 
     function isValidVoiceMemory(data) {
@@ -946,6 +956,7 @@ service cloud.firestore {
                     'scope',
           'familyId',
           'circleIds',
+          'encrypted',
           'recordKind',
           'customKindLabel',
           'createdAt',
@@ -960,7 +971,7 @@ service cloud.firestore {
         && isValidHouseholdStamp(data, 'other')
         && (!('scope' in data) || data.scope in ['private', 'household', 'family', 'circles'])
         && (!('familyId' in data) || (data.familyId is string && data.familyId.size() <= 128))
-        && (!('recordKind' in data) || data.recordKind in ['financial', 'medical', 'calendar', 'personal', 'custom'])
+        && (!('recordKind' in data) || data.recordKind in ['financial', 'medical', 'calendar', 'personal', 'custom', 'official'])
         && (!('customKindLabel' in data) || (data.customKindLabel is string && data.customKindLabel.size() <= 60))
         && (!('circleIds' in data) || isBoundedStringList(data.circleIds, 4, 128))
         && data.area in ['conservancy', 'cabin_maintenance', 'cabin_stay']
@@ -977,13 +988,14 @@ service cloud.firestore {
         && data.inspectorOrGuest is string
         && data.inspectorOrGuest.size() <= 120
         && data.notes is string
-        && data.notes.size() <= 2000
+        && data.notes.size() <= 3000
         && data.linkedDocumentId is string
         && data.get('place', '') is string
         && data.get('place', '').size() <= 60
         && data.linkedDocumentId.size() <= 128
         && data.createdAt is timestamp
-        && data.updatedAt is timestamp;
+        && data.updatedAt is timestamp
+        && (!('encrypted' in data) || data.encrypted is bool);
     }
 
     function isValidFinanceEntry(data) {
@@ -1022,6 +1034,7 @@ service cloud.firestore {
                     'scope',
           'familyId',
           'circleIds',
+          'encrypted',
           'createdAt',
           'updatedAt'
         ])
@@ -1053,14 +1066,15 @@ service cloud.firestore {
         && data.get('propertyScope', 'general') in ['general', 'home', 'wimberley_conservancy', 'wimberley_cabin']
         && data.taxDeductible is bool
         && data.notes is string
-        && data.notes.size() <= 2000
+        && data.notes.size() <= 3000
         && data.linkedDocumentId is string
         && data.get('place', '') is string
         && data.get('place', '').size() <= 60
         && data.get('careForJason', false) is bool
         && data.linkedDocumentId.size() <= 128
         && data.createdAt is timestamp
-        && data.updatedAt is timestamp;
+        && data.updatedAt is timestamp
+        && (!('encrypted' in data) || data.encrypted is bool);
     }
 
 

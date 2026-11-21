@@ -73,6 +73,8 @@ import {
   circleHeadIds,
   computeStreamLists,
   effectiveRecordKind,
+  effectiveSealedKinds,
+  RECORD_KIND_LABELS,
   familyResponsibleAge,
   personIsResponsible,
   Family,
@@ -113,6 +115,16 @@ import {
   uploadDriveBinaryFile,
   WorkspaceBackupSnapshot,
 } from './services/googleDriveBackup';
+import {
+  createVault,
+  isSealedValue,
+  isVaultUnlocked,
+  lockVault,
+  sealText,
+  subscribeVault,
+  unlockVault,
+  unsealText,
+} from './services/vault';
 import { PWAInstallModalTrigger } from './components/PWAInstallModal';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 
@@ -963,9 +975,90 @@ function MainApp() {
     return !(fam.notYetIds || []).includes(user.uid);
   }
 
+  // Sealed records (Jason, 2026-11-21): while the owner's vault is
+  // unlocked on this device, sealed text is opened for display; while
+  // it is locked, display copies carry the envelope only — title,
+  // kind, place, date — with the words blanked, so no screen and no
+  // briefing ever shows sealed gibberish. Stored records are never
+  // touched by this; it is a display layer only, and every list below
+  // reads from it.
+  const [vaultUnlockedState, setVaultUnlockedState] = useState(isVaultUnlocked());
+  useEffect(() => subscribeVault(() => setVaultUnlockedState(isVaultUnlocked())), []);
+  const [vaultPass, setVaultPass] = useState('');
+  const [vaultPassConfirm, setVaultPassConfirm] = useState('');
+  const [vaultFeedback, setVaultFeedback] = useState<string | null>(null);
+  const sealedKindsNow = effectiveSealedKinds(userProfile);
+  const sealIfText = async (v: string) => (v && !isSealedValue(v) ? await sealText(v) : v);
+  const [unsealedTasks, setUnsealedTasks] = useState<ScheduleTask[]>([]);
+  const [unsealedDocuments, setUnsealedDocuments] = useState<ScannedDocument[]>([]);
+  const [unsealedPropertyEntries, setUnsealedPropertyEntries] = useState<PropertyEntry[]>([]);
+  const [unsealedFinanceEntries, setUnsealedFinanceEntries] = useState<FinanceEntry[]>([]);
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      if (!vaultUnlockedState) {
+        if (live) {
+          setUnsealedTasks(tasks);
+          setUnsealedDocuments(
+            documents.map((d) =>
+              d.encrypted ? { ...d, ocrText: '', summary: '', keyDetails: [], notes: '' } : d
+            )
+          );
+          setUnsealedPropertyEntries(
+            propertyEntries.map((e) => (e.encrypted ? { ...e, notes: '' } : e))
+          );
+          setUnsealedFinanceEntries(
+            financeEntries.map((e) => (e.encrypted ? { ...e, notes: '' } : e))
+          );
+        }
+        return;
+      }
+      const unsealField = async (v: string) =>
+        isSealedValue(v) ? await unsealText(v).catch(() => v) : v;
+      const [t, d, pe, fe] = await Promise.all([
+        Promise.all(
+          tasks.map(async (r) => (r.encrypted ? { ...r, notes: await unsealField(r.notes) } : r))
+        ),
+        Promise.all(
+          documents.map(async (r) =>
+            r.encrypted
+              ? {
+                  ...r,
+                  ocrText: await unsealField(r.ocrText),
+                  summary: await unsealField(r.summary),
+                  keyDetails: await Promise.all(r.keyDetails.map(unsealField)),
+                  notes: await unsealField(r.notes),
+                }
+              : r
+          )
+        ),
+        Promise.all(
+          propertyEntries.map(async (r) =>
+            r.encrypted ? { ...r, notes: await unsealField(r.notes) } : r
+          )
+        ),
+        Promise.all(
+          financeEntries.map(async (r) =>
+            r.encrypted ? { ...r, notes: await unsealField(r.notes) } : r
+          )
+        ),
+      ]);
+      if (live) {
+        setUnsealedTasks(t);
+        setUnsealedDocuments(d);
+        setUnsealedPropertyEntries(pe);
+        setUnsealedFinanceEntries(fe);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, documents, propertyEntries, financeEntries, vaultUnlockedState]);
+
   const visibleTasks = useMemo(
     () =>
-      tasks.filter(
+      unsealedTasks.filter(
         (t) =>
           householdInScope(t.householdId) ||
           (t.scope &&
@@ -973,11 +1066,11 @@ function MainApp() {
             (t.scope !== 'circles' || circleRecordVisible(t, 'tasks')))
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tasks, activeHousehold, households]
+    [unsealedTasks, activeHousehold, households]
   );
   const visibleDocuments = useMemo(
     () =>
-      documents.filter(
+      unsealedDocuments.filter(
         (d) =>
           householdInScope(d.householdId) ||
           (d.scope &&
@@ -986,11 +1079,11 @@ function MainApp() {
             (d.scope !== 'family' || familyRecordVisible(d)))
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [documents, activeHousehold, households]
+    [unsealedDocuments, activeHousehold, households]
   );
   const visiblePropertyEntries = useMemo(
     () =>
-      propertyEntries.filter(
+      unsealedPropertyEntries.filter(
         (e) =>
           householdInScope(e.householdId) ||
           (e.scope &&
@@ -999,11 +1092,11 @@ function MainApp() {
             (e.scope !== 'family' || familyRecordVisible(e)))
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [propertyEntries, activeHousehold, households]
+    [unsealedPropertyEntries, activeHousehold, households]
   );
   const visibleFinanceEntries = useMemo(
     () =>
-      financeEntries.filter((e) => {
+      unsealedFinanceEntries.filter((e) => {
         if (householdInScope(e.householdId)) return true;
         if (!e.scope || e.scope === 'household') return false;
         if (e.scope === 'family') return familyRecordVisible(e);
@@ -1018,7 +1111,7 @@ function MainApp() {
         return Boolean(origin?.allowPartnerFinances);
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [financeEntries, activeHousehold, households]
+    [unsealedFinanceEntries, activeHousehold, households]
   );
   const visibleJasonNotes = useMemo(
     () =>
@@ -1340,6 +1433,10 @@ function MainApp() {
         scopeFields = aimed.scopeFields;
       }
     }
+    const taskSealed = sealedKindsNow.includes('calendar') && isVaultUnlocked();
+    const taskNotes = taskSealed
+      ? await sealIfText((payload.notes || '').slice(0, 2000))
+      : (payload.notes || '').slice(0, 2000);
     try {
       await setDoc(doc(db, 'tasks', id), {
         userId: user.uid,
@@ -1356,8 +1453,9 @@ function MainApp() {
         reminderMinutes: Math.max(0, Math.min(43200, payload.reminderMinutes ?? 60)),
         status: 'pending',
         priority: payload.priority,
-        notes: (payload.notes || '').slice(0, 2000),
+        notes: taskNotes,
         helpSteps: (payload.helpSteps || []).slice(0, 15).map((s) => s.slice(0, 400)),
+        ...(taskSealed ? { encrypted: true } : {}),
         linkedDocumentId: (payload.linkedDocumentId || '').slice(0, 128),
         completedAtIso: '',
         createdAt: serverTimestamp(),
@@ -1428,6 +1526,26 @@ function MainApp() {
         clean.reminderMinutes = Math.max(0, Math.min(43200, updates.reminderMinutes));
       if (updates.priority !== undefined) clean.priority = updates.priority;
       if (updates.notes !== undefined) clean.notes = updates.notes.slice(0, 2000);
+      // Sealed note (Jason, 2026-11-21): a sealed record's note is
+      // never written from a locked edit, is sealed again on save
+      // while the vault is unlocked, and returns to plain when its
+      // kind is no longer sealed.
+      if (clean.notes !== undefined) {
+        if (existingRec?.encrypted && !isVaultUnlocked()) {
+          delete clean.notes;
+        } else if (isSealedValue(clean.notes as string)) {
+          delete clean.notes;
+        } else if (sealedKindsNow.includes('calendar')) {
+          if (isVaultUnlocked()) {
+            clean.notes = await sealIfText(clean.notes as string);
+            clean.encrypted = true;
+          } else {
+            delete clean.notes;
+          }
+        } else if (existingRec?.encrypted) {
+          clean.encrypted = false;
+        }
+      }
       if (updates.helpSteps !== undefined)
         clean.helpSteps = updates.helpSteps.slice(0, 15).map((s) => s.slice(0, 400));
       if (updates.linkedDocumentId !== undefined)
@@ -1729,6 +1847,9 @@ function MainApp() {
     mailNewsletters?: boolean;
     mailOnlySenders?: string;
     mailNeverSenders?: string;
+    vaultSalt?: string;
+    vaultCheck?: string;
+    sealedKinds?: RecordKind[];
   }) {
     if (!user) return;
     try {
@@ -1739,6 +1860,51 @@ function MainApp() {
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
     }
+  }
+
+  // The sealed-records vault (Jason, 2026-11-21): the passphrase is
+  // never stored; making a vault stores only a random salt and a
+  // sealed check value on the profile, and the key lives in memory
+  // on this device until it is locked or the app closes.
+  async function handleCreateVault() {
+    if (!user || !userProfile) return;
+    if (vaultPass.length < 8) {
+      setVaultFeedback(
+        'Use at least 8 characters — a few words you will remember. There is no reset if you forget it.'
+      );
+      return;
+    }
+    if (vaultPass !== vaultPassConfirm) {
+      setVaultFeedback('The two passphrases do not match. Type the same one twice.');
+      return;
+    }
+    try {
+      const made = await createVault(vaultPass);
+      await handleUpdateDeskPrefs({ vaultSalt: made.salt, vaultCheck: made.check });
+      setVaultPass('');
+      setVaultPassConfirm('');
+      setVaultFeedback('Your vault is made, and it is unlocked on this device.');
+    } catch {
+      setVaultFeedback('The vault could not be made just now. Try again.');
+    }
+  }
+
+  async function handleUnlockVault() {
+    if (!userProfile?.vaultSalt || !userProfile?.vaultCheck) return;
+    const ok = await unlockVault(vaultPass, userProfile.vaultSalt, userProfile.vaultCheck);
+    if (ok) {
+      setVaultPass('');
+      setVaultFeedback(
+        'Unlocked on this device. Sealed records can be read and filed until you lock the vault or close the app.'
+      );
+    } else {
+      setVaultFeedback('That passphrase did not open the vault. Try again.');
+    }
+  }
+
+  function handleLockVault() {
+    lockVault();
+    setVaultFeedback('Locked. Sealed records stay sealed until you unlock the vault again.');
   }
 
   // The family and the circles (Jason, 2026-11-20): the widest ring
@@ -2517,6 +2683,28 @@ function MainApp() {
         driveFileId = '';
       }
     }
+    // Sealed kinds (Jason, 2026-11-21): the words of a record whose
+    // kind is set to be sealed are encrypted on this device before
+    // the record is stored — Official papers from the start. Filing
+    // one while the vault is locked refuses plainly rather than
+    // storing the words unsealed.
+    const docKind = payload.recordKind || 'personal';
+    const docSealed = sealedKindsNow.includes(docKind);
+    if (docSealed && !isVaultUnlocked()) {
+      throw new Error('This kind of record is set to be sealed, but your vault is locked. Open Settings, unlock your vault, then file it again — or file it under a kind that is not sealed.');
+    }
+    const sealedOcrText = docSealed
+      ? await sealIfText(payload.ocrText.slice(0, 99000))
+      : payload.ocrText.slice(0, 99000);
+    const sealedSummary = docSealed
+      ? await sealIfText(payload.summary.slice(0, 1000))
+      : payload.summary.slice(0, 1000);
+    const sealedKeyDetails = docSealed
+      ? await Promise.all(payload.keyDetails.slice(0, 25).map((k) => sealIfText(k.slice(0, 240))))
+      : payload.keyDetails.slice(0, 25).map((k) => k.slice(0, 240));
+    const sealedNotes = docSealed
+      ? await sealIfText((payload.notes || '').slice(0, 2000))
+      : (payload.notes || '').slice(0, 2000);
     try {
       await setDoc(doc(db, 'documents', id), {
         userId: user.uid,
@@ -2524,14 +2712,14 @@ function MainApp() {
         memberIds: stamp.memberIds,
         title: payload.title.slice(0, 200),
         category: payload.category,
-        ocrText: payload.ocrText.slice(0, 99000),
-        summary: payload.summary.slice(0, 1000),
+        ocrText: sealedOcrText,
+        summary: sealedSummary,
         tags: payload.tags.slice(0, 20).map((t) => t.slice(0, 40)),
-        keyDetails: payload.keyDetails.slice(0, 25).map((k) => k.slice(0, 240)),
+        keyDetails: sealedKeyDetails,
         detectedDate: payload.detectedDate.slice(0, 20),
         imageUrl: payload.imageUrl.slice(0, 500),
         fileName: payload.fileName.slice(0, 200),
-        notes: (payload.notes || '').slice(0, 2000),
+        notes: sealedNotes,
         verificationStatus: 'provisional',
         verifiedByName: '',
         verifiedAtIso: '',
@@ -2539,6 +2727,7 @@ function MainApp() {
         recordKind: payload.recordKind || 'personal',
         customKindLabel:
           payload.recordKind === 'custom' ? (payload.customKindLabel || '').slice(0, 60) : '',
+        ...(docSealed ? { encrypted: true } : {}),
         driveFileId,
         place: (payload.place || '').slice(0, 60),
         createdAt: serverTimestamp(),
@@ -2595,6 +2784,43 @@ function MainApp() {
         if (clean.driveFileId === undefined)
           clean.driveFileId = existingDoc.driveFileId || '';
         if (clean.place === undefined) clean.place = existingDoc.place || '';
+      }
+
+      // Sealed records (Jason, 2026-11-21): while the vault is
+      // locked, a sealed paper's words are never written from an
+      // edit — the stored envelopes stay untouched. While it is
+      // unlocked, words saved for a sealed kind are sealed again;
+      // words saved under a kind no longer sealed go back to plain
+      // and the record stops being marked sealed.
+      const docKindNow = (updates.recordKind ?? existingDoc?.recordKind) || 'personal';
+      const docTextTouched =
+        updates.ocrText !== undefined ||
+        updates.summary !== undefined ||
+        updates.keyDetails !== undefined ||
+        updates.notes !== undefined;
+      if (docTextTouched && existingDoc?.encrypted && !isVaultUnlocked()) {
+        delete clean.ocrText;
+        delete clean.summary;
+        delete clean.keyDetails;
+        delete clean.notes;
+      } else if (docTextTouched && sealedKindsNow.includes(docKindNow)) {
+        if (isVaultUnlocked()) {
+          if (clean.ocrText !== undefined) clean.ocrText = await sealIfText(clean.ocrText as string);
+          if (clean.summary !== undefined) clean.summary = await sealIfText(clean.summary as string);
+          if (clean.notes !== undefined) clean.notes = await sealIfText(clean.notes as string);
+          if (Array.isArray(clean.keyDetails))
+            clean.keyDetails = await Promise.all(
+              (clean.keyDetails as string[]).map((k) => sealIfText(k))
+            );
+          clean.encrypted = true;
+        } else {
+          delete clean.ocrText;
+          delete clean.summary;
+          delete clean.keyDetails;
+          delete clean.notes;
+        }
+      } else if (docTextTouched && existingDoc?.encrypted) {
+        clean.encrypted = false;
       }
 
       await updateDoc(doc(db, 'documents', docId), clean);
@@ -2988,6 +3214,14 @@ function MainApp() {
     if (!user) return;
     const id = createSafeId('prop');
     const stamp = householdStamp();
+    const propKind = payload.recordKind || 'personal';
+    const propSealed = sealedKindsNow.includes(propKind);
+    if (propSealed && !isVaultUnlocked()) {
+      throw new Error('This kind of record is set to be sealed, but your vault is locked. Open Settings, unlock your vault, then file it again — or file it under a kind that is not sealed.');
+    }
+    const propNotes = propSealed
+      ? await sealIfText((payload.notes || '').slice(0, 2000))
+      : (payload.notes || '').slice(0, 2000);
     try {
       await setDoc(doc(db, 'propertyEntries', id), {
         userId: user.uid,
@@ -3001,11 +3235,12 @@ function MainApp() {
         endDate: payload.endDate || '',
         cadence: payload.cadence,
         inspectorOrGuest: (payload.inspectorOrGuest || '').slice(0, 120),
-        notes: (payload.notes || '').slice(0, 2000),
+        notes: propNotes,
         linkedDocumentId: (payload.linkedDocumentId || '').slice(0, 128),
         recordKind: payload.recordKind || 'personal',
         customKindLabel:
           payload.recordKind === 'custom' ? (payload.customKindLabel || '').slice(0, 60) : '',
+        ...(propSealed ? { encrypted: true } : {}),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
@@ -3040,6 +3275,26 @@ function MainApp() {
         clean.linkedDocumentId = updates.linkedDocumentId.slice(0, 128);
       if (updates.place !== undefined) clean.place = updates.place.slice(0, 60);
       if (updates.recordKind !== undefined) clean.recordKind = updates.recordKind;
+      // Sealed note (Jason, 2026-11-21): a sealed record's note is
+      // never written from a locked edit, is sealed again on save
+      // while the vault is unlocked, and returns to plain when its
+      // kind is no longer sealed.
+      if (clean.notes !== undefined) {
+        if (existingRec?.encrypted && !isVaultUnlocked()) {
+          delete clean.notes;
+        } else if (isSealedValue(clean.notes as string)) {
+          delete clean.notes;
+        } else if (sealedKindsNow.includes((updates.recordKind ?? existingRec?.recordKind) || 'personal')) {
+          if (isVaultUnlocked()) {
+            clean.notes = await sealIfText(clean.notes as string);
+            clean.encrypted = true;
+          } else {
+            delete clean.notes;
+          }
+        } else if (existingRec?.encrypted) {
+          clean.encrypted = false;
+        }
+      }
       if (updates.customKindLabel !== undefined)
         clean.customKindLabel = updates.customKindLabel.slice(0, 60);
 
@@ -3064,6 +3319,10 @@ function MainApp() {
     if (!user) return;
     const id = createSafeId('fin');
     const stamp = householdStamp();
+    const finSealed = sealedKindsNow.includes('financial') && isVaultUnlocked();
+    const finNotes = finSealed
+      ? await sealIfText((payload.notes || '').slice(0, 2000))
+      : (payload.notes || '').slice(0, 2000);
     try {
       await setDoc(doc(db, 'financeEntries', id), {
         userId: user.uid,
@@ -3078,8 +3337,9 @@ function MainApp() {
         place: (payload.place || '').slice(0, 60),
         careForJason: Boolean(payload.careForJason),
         taxDeductible: Boolean(payload.taxDeductible),
-        notes: (payload.notes || '').slice(0, 2000),
+        notes: finNotes,
         linkedDocumentId: (payload.linkedDocumentId || '').slice(0, 128),
+        ...(finSealed ? { encrypted: true } : {}),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
@@ -3112,6 +3372,26 @@ function MainApp() {
       if (updates.careForJason !== undefined) clean.careForJason = Boolean(updates.careForJason);
       if (updates.taxDeductible !== undefined) clean.taxDeductible = Boolean(updates.taxDeductible);
       if (updates.notes !== undefined) clean.notes = updates.notes.slice(0, 2000);
+      // Sealed note (Jason, 2026-11-21): a sealed record's note is
+      // never written from a locked edit, is sealed again on save
+      // while the vault is unlocked, and returns to plain when its
+      // kind is no longer sealed.
+      if (clean.notes !== undefined) {
+        if (existingRec?.encrypted && !isVaultUnlocked()) {
+          delete clean.notes;
+        } else if (isSealedValue(clean.notes as string)) {
+          delete clean.notes;
+        } else if (sealedKindsNow.includes('financial')) {
+          if (isVaultUnlocked()) {
+            clean.notes = await sealIfText(clean.notes as string);
+            clean.encrypted = true;
+          } else {
+            delete clean.notes;
+          }
+        } else if (existingRec?.encrypted) {
+          clean.encrypted = false;
+        }
+      }
       if (updates.linkedDocumentId !== undefined)
         clean.linkedDocumentId = updates.linkedDocumentId.slice(0, 128);
 
@@ -4294,6 +4574,113 @@ function MainApp() {
                   )}
                 </div>
               )}
+              <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                  Sealed records
+                </p>
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  A sealed record is locked with a passphrase only you know, on this
+                  device, before it is stored. The desk keeps the envelope — the title,
+                  the kind, the place, the date — but the words inside can only be read
+                  while your vault is unlocked. Official papers are sealed from the
+                  start; any other kind can be sealed too. If you forget the
+                  passphrase, sealed records cannot be opened again. There is no back
+                  door and no reset.
+                </p>
+                {!userProfile?.vaultCheck ? (
+                  <div className="space-y-2">
+                    <input
+                      type="password"
+                      value={vaultPass}
+                      onChange={(e) => setVaultPass(e.target.value)}
+                      placeholder="Choose a passphrase"
+                      autoComplete="new-password"
+                      className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                    />
+                    <input
+                      type="password"
+                      value={vaultPassConfirm}
+                      onChange={(e) => setVaultPassConfirm(e.target.value)}
+                      placeholder="Type it again"
+                      autoComplete="new-password"
+                      className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleCreateVault()}
+                      className="min-h-[42px] inline-flex items-center gap-1.5 px-3.5 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-lg"
+                    >
+                      <span>Make my vault</span>
+                    </button>
+                  </div>
+                ) : vaultUnlockedState ? (
+                  <div className="space-y-2">
+                    <p className="text-xs text-teal-700 dark:text-teal-400">
+                      Your vault is unlocked on this device.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleLockVault}
+                      className="min-h-[42px] inline-flex items-center gap-1.5 px-3.5 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-lg"
+                    >
+                      <span>Lock the vault</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <input
+                      type="password"
+                      value={vaultPass}
+                      onChange={(e) => setVaultPass(e.target.value)}
+                      placeholder="Your passphrase"
+                      autoComplete="current-password"
+                      className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleUnlockVault()}
+                      className="min-h-[42px] inline-flex items-center gap-1.5 px-3.5 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-lg"
+                    >
+                      <span>Unlock the vault</span>
+                    </button>
+                  </div>
+                )}
+                <div className="space-y-1.5 pt-1">
+                  {(Object.keys(RECORD_KIND_LABELS) as RecordKind[]).map((kind) => (
+                    <label
+                      key={kind}
+                      className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={sealedKindsNow.includes(kind)}
+                        onChange={(e) => {
+                          const next = e.target.checked
+                            ? [...sealedKindsNow, kind]
+                            : sealedKindsNow.filter((k) => k !== kind);
+                          void handleUpdateDeskPrefs({ sealedKinds: next });
+                        }}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        Seal {RECORD_KIND_LABELS[kind]} records
+                        {kind === 'official' ? ' — on from the start' : ''}
+                        {kind === 'financial' || kind === 'calendar'
+                          ? ' (the note is sealed; the entry itself stays on the ledger or the calendar)'
+                          : ''}
+                      </span>
+                    </label>
+                  ))}
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Records already filed keep the sealing they were filed with.
+                    Changing a switch changes what happens the next time a record is
+                    filed or its words are saved.
+                  </p>
+                </div>
+                {vaultFeedback && (
+                  <p className="text-xs text-teal-700 dark:text-teal-400">{vaultFeedback}</p>
+                )}
+              </div>
             </form>
 
             <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">

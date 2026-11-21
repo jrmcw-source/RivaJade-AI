@@ -230,6 +230,8 @@ export const WimberleyPropertyView: React.FC<WimberleyPropertyViewProps> = ({
         setFeedback(`Added "${payload.title}" to Wimberley monitor.`);
       }
       setModalOpen(false);
+    } catch (err) {
+      setFeedback(err instanceof Error ? err.message : 'That entry could not be saved.');
     } finally {
       setSaving(false);
     }
@@ -768,6 +770,12 @@ export const WimberleyPropertyView: React.FC<WimberleyPropertyViewProps> = ({
                         {entry.notes && (
                           <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
                             {entry.notes}
+                          </p>
+                        )}
+
+                        {entry.encrypted && !entry.notes && (
+                          <p className="text-xs text-teal-700 dark:text-teal-400">
+                            Sealed note — unlock your vault in Settings to read it.
                           </p>
                         )}
 
