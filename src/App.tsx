@@ -31,6 +31,7 @@ import {
   Mail,
   WifiOff,
   Trees,
+  Network,
   Wallet,
   Download,
   HardDrive,
@@ -68,7 +69,9 @@ import {
   MorningBriefing,
   MailBriefing,
   Family,
+  FamilyPerson,
   Circle,
+  familyHeadName,
   ProjectInvite,
   ProjectMember,
   ProjectTask,
@@ -93,6 +96,7 @@ import { FinancesView } from './components/FinancesView';
 import { GoogleDriveBackupModal } from './components/GoogleDriveBackupModal';
 import { AIAssistantDrawer } from './components/AIAssistantDrawer';
 import { FrontDoorView, FrontDoorDeskId } from './components/FrontDoorView';
+import { TreeView } from './components/TreeView';
 import {
   ensureStewardPhotosFolder,
   listDriveBackups,
@@ -110,6 +114,7 @@ type NavTab =
   | 'vault'
   | 'projects'
   | 'voice'
+  | 'tree'
   | 'analytics';
 
 function sanitizeHandle(raw: string, fallbackUid: string): string {
@@ -200,6 +205,7 @@ function withFamilyDefaults(rec: Omit<Family, 'id'>): Omit<Family, 'id'> {
     ownerId: rec.ownerId || '',
     ownerName: rec.ownerName || '',
     memberIds: rec.memberIds || [],
+    people: rec.people || [],
   };
 }
 
@@ -1093,6 +1099,60 @@ function MainApp() {
     return { householdId: '', memberIds: user ? [user.uid] : [] };
   }
 
+  // The audience for a set of visibility tags (Jason, 2026-11-20):
+  // computes the memberIds snapshot the rules will check, for the
+  // ring or circles named. Returns null when the tags name something
+  // the writer can't use — a family they're not counted in, a circle
+  // they don't hold — and the caller keeps the existing stamp. The
+  // depositor is always in the audience and always the owner.
+  function audienceFor(
+    scope: string | undefined,
+    familyId: string | undefined,
+    circleIds: string[] | undefined,
+    originHouseholdId: string
+  ): { householdId: string; memberIds: string[]; scopeFields: Record<string, unknown> } | null {
+    if (!user) return null;
+    if (scope === 'private') {
+      return {
+        householdId: originHouseholdId,
+        memberIds: [user.uid],
+        scopeFields: { scope: 'private', familyId: '', circleIds: [] },
+      };
+    }
+    if (scope === 'family') {
+      const fam = families.find((f) => f.id === (familyId || '')) || activeFamily;
+      if (!fam || !fam.memberIds.includes(user.uid)) return null;
+      return {
+        householdId: originHouseholdId,
+        memberIds: fam.memberIds.slice(0, 100),
+        scopeFields: { scope: 'family', familyId: fam.id, circleIds: [] },
+      };
+    }
+    if (scope === 'circles' && circleIds?.length) {
+      const ids = circleIds.slice(0, 4);
+      const audience = new Set<string>([user.uid]);
+      for (const cid of ids) {
+        const c = circles.find((x) => x.id === cid);
+        if (!c || !c.memberIds.includes(user.uid)) return null;
+        c.memberIds.forEach((m) => audience.add(m));
+      }
+      return {
+        householdId: originHouseholdId,
+        memberIds: [...audience].slice(0, 100),
+        scopeFields: { scope: 'circles', familyId: '', circleIds: ids },
+      };
+    }
+    if (scope === 'household') {
+      const stamp = householdStamp();
+      return {
+        householdId: stamp.householdId,
+        memberIds: stamp.memberIds,
+        scopeFields: { scope: 'household', familyId: '', circleIds: [] },
+      };
+    }
+    return null;
+  }
+
   async function handleCreateTask(
     payload: Omit<
       ScheduleTask,
@@ -1110,38 +1170,17 @@ function MainApp() {
     const id = createSafeId('task');
     let stamp = householdStamp();
     let scopeFields: Record<string, unknown> = {};
-    // Visibility (Jason, 2026-11-20): the composer can aim a task at a
-    // ring or a circle; the audience snapshot is computed here, and
-    // the depositor (userId) is always in it and always the owner.
-    if (payload.scope === 'private') {
-      stamp = {
-        householdId: activeHousehold?.householdId || '',
-        memberIds: [user.uid],
-      };
-      scopeFields = { scope: 'private', familyId: '', circleIds: [] };
-    } else if (payload.scope === 'family' && (payload.familyId || activeFamily)) {
-      const fam =
-        families.find((f) => f.id === (payload.familyId || '')) || activeFamily;
-      if (fam) {
-        stamp = {
-          householdId: activeHousehold?.householdId || '',
-          memberIds: fam.memberIds.slice(0, 100),
-        };
-        scopeFields = { scope: 'family', familyId: fam.id, circleIds: [] };
-      }
-    } else if (payload.scope === 'circles' && payload.circleIds?.length) {
-      const ids = payload.circleIds.slice(0, 4);
-      const audience = new Set<string>([user.uid]);
-      ids.forEach((cid) =>
-        circles
-          .find((c) => c.id === cid)
-          ?.memberIds.forEach((m) => audience.add(m))
+    if (payload.scope) {
+      const aimed = audienceFor(
+        payload.scope,
+        payload.familyId,
+        payload.circleIds,
+        activeHousehold?.householdId || ''
       );
-      stamp = {
-        householdId: activeHousehold?.householdId || '',
-        memberIds: [...audience].slice(0, 100),
-      };
-      scopeFields = { scope: 'circles', familyId: '', circleIds: ids };
+      if (aimed) {
+        stamp = { householdId: aimed.householdId, memberIds: aimed.memberIds };
+        scopeFields = aimed.scopeFields;
+      }
     }
     try {
       await setDoc(doc(db, 'tasks', id), {
@@ -1182,6 +1221,42 @@ function MainApp() {
           existingRec.memberIds && existingRec.memberIds.length > 0
             ? existingRec.memberIds
             : [existingRec.userId];
+      }
+
+      // Re-aiming a record (Jason, 2026-11-20): only its owner can
+      // change who can see it. The audience is recomputed from the
+      // tags; the record stays the owner's throughout.
+      if (
+        existingRec &&
+        existingRec.userId === user.uid &&
+        (updates.scope !== undefined ||
+          updates.circleIds !== undefined ||
+          updates.familyId !== undefined)
+      ) {
+        const aimed = audienceFor(
+          updates.scope ?? existingRec.scope,
+          updates.familyId ?? existingRec.familyId,
+          updates.circleIds ?? existingRec.circleIds,
+          existingRec.householdId || ''
+        );
+        // Only a real change of tags re-aims the record — an edit
+        // that leaves the picker where it was must not move the
+        // record (the household stamp, for one, follows whichever
+        // household is on screen today).
+        const tagsChanged =
+          (updates.scope ?? existingRec.scope ?? 'household') !==
+            (existingRec.scope ?? 'household') ||
+          (updates.familyId ?? existingRec.familyId ?? '') !==
+            (existingRec.familyId ?? '') ||
+          JSON.stringify(updates.circleIds ?? existingRec.circleIds ?? []) !==
+            JSON.stringify(existingRec.circleIds ?? []);
+        if (aimed && tagsChanged) {
+          clean.householdId = aimed.householdId;
+          clean.memberIds = aimed.memberIds;
+          clean.scope = aimed.scopeFields.scope;
+          clean.familyId = aimed.scopeFields.familyId;
+          clean.circleIds = aimed.scopeFields.circleIds;
+        }
       }
 
       if (updates.title !== undefined) clean.title = updates.title.slice(0, 200);
@@ -1560,6 +1635,54 @@ function MainApp() {
     }
   }
 
+  const [personNameDraft, setPersonNameDraft] = useState('');
+  const [personYearDraft, setPersonYearDraft] = useState('');
+
+  async function handleAddFamilyPerson(family: Family) {
+    const name = personNameDraft.trim().slice(0, 80);
+    if (!name) return;
+    const year = Number(personYearDraft);
+    const person: FamilyPerson = {
+      name,
+      ...(year >= 1850 && year <= 2100 ? { birthYear: year } : {}),
+      living: true,
+    };
+    try {
+      await updateDoc(doc(db, 'families', family.id), {
+        people: [...(family.people || []), person].slice(0, 100),
+        updatedAt: serverTimestamp(),
+      });
+      setPersonNameDraft('');
+      setPersonYearDraft('');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `families/${family.id}`);
+    }
+  }
+
+  async function handleSetFamilyPersonLiving(family: Family, idx: number, living: boolean) {
+    try {
+      await updateDoc(doc(db, 'families', family.id), {
+        people: (family.people || []).map((person, i) =>
+          i === idx ? { ...person, living } : person
+        ),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `families/${family.id}`);
+    }
+  }
+
+  async function handleRemoveFamilyPerson(family: Family, idx: number) {
+    try {
+      await updateDoc(doc(db, 'families', family.id), {
+        people: (family.people || []).filter((_, i) => i !== idx),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `families/${family.id}`);
+    }
+  }
+
   async function handleCreateCircle(e: React.FormEvent) {
     e.preventDefault();
     if (!user) return;
@@ -1587,9 +1710,51 @@ function MainApp() {
   }
 
   async function handleDeleteCircle(circle: Circle) {
+    if (!user) return;
+    // Ending a circle (Jason, 2026-11-20): records I tagged to it
+    // fall back — to their remaining circles, or to me alone when
+    // this was the only tag. Nobody can re-stamp another person's
+    // deposit, so other owners' records keep the audience they were
+    // given until their owners touch them.
+    const sweep = async (
+      coll: string,
+      recs: Array<{ id: string; userId: string; circleIds?: string[] }>
+    ) => {
+      for (const rec of recs) {
+        if (rec.userId !== user.uid || !rec.circleIds?.includes(circle.id)) continue;
+        const remaining = rec.circleIds.filter((c) => c !== circle.id);
+        try {
+          if (remaining.length === 0) {
+            await updateDoc(doc(db, coll, rec.id), {
+              scope: 'private',
+              circleIds: [],
+              memberIds: [user.uid],
+              updatedAt: serverTimestamp(),
+            });
+          } else {
+            const aimed = audienceFor('circles', '', remaining, '');
+            if (aimed) {
+              await updateDoc(doc(db, coll, rec.id), {
+                scope: 'circles',
+                circleIds: remaining,
+                memberIds: aimed.memberIds,
+                updatedAt: serverTimestamp(),
+              });
+            }
+          }
+        } catch {
+          // A refused re-stamp leaves the record as it was; ending
+          // the circle still proceeds.
+        }
+      }
+    };
+    await sweep('tasks', tasks);
+    await sweep('documents', documents);
+    await sweep('financeEntries', financeEntries);
+    await sweep('propertyEntries', propertyEntries);
     try {
       await deleteDoc(doc(db, 'circles', circle.id));
-      setCircleFeedback(`Circle "${circle.name}" ended. Records tagged to it keep their other tags and their owner.`);
+      setCircleFeedback(`Circle "${circle.name}" ended. Your records tagged to it fell back to their other tags, or to you alone.`);
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `circles/${circle.id}`);
     }
@@ -2812,6 +2977,7 @@ function MainApp() {
       badge: unreadAlertsCount > 0 ? unreadAlertsCount : undefined,
     },
     { id: 'voice', label: 'Voice Live', mobileLabel: 'Voice', icon: <Mic className="w-4 h-4" /> },
+    { id: 'tree', label: 'The Tree', icon: <Network className="w-4 h-4" /> },
     { id: 'analytics', label: 'Analytics', icon: <BarChart3 className="w-4 h-4" /> },
   ];
 
@@ -3199,6 +3365,15 @@ function MainApp() {
               onDeleteEntry={handleDeletePropertyEntry}
               onScheduleReminderTask={handleCreateTask}
               onToggleTaskComplete={handleToggleTaskComplete}
+            />
+          )}
+
+          {activeTab === 'tree' && (
+            <TreeView
+              families={families}
+              households={households}
+              circles={circles}
+              activeHousehold={activeHousehold}
             />
           )}
 
@@ -3661,29 +3836,96 @@ function MainApp() {
                       </p>
                     ) : (
                       families.map((f) => (
-                        <div
-                          key={f.id}
-                          className="flex items-center justify-between gap-2 px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
-                        >
-                          <span className="text-xs text-slate-900 dark:text-slate-100">
-                            {f.name}
-                            <span className="text-slate-500 dark:text-slate-400">
-                              {' '}
-                              — {f.memberIds.length} people
-                              {activeFamily?.id === f.id ? ' · this household is linked' : ''}
+                        <div key={f.id} className="space-y-2">
+                          <div className="flex items-center justify-between gap-2 px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg">
+                            <span className="text-xs text-slate-900 dark:text-slate-100">
+                              {f.name}
+                              <span className="text-slate-500 dark:text-slate-400">
+                                {' '}
+                                — {f.memberIds.length} account{f.memberIds.length === 1 ? '' : 's'}
+                                {activeFamily?.id === f.id ? ' · this household is linked' : ''}
+                              </span>
                             </span>
-                          </span>
-                          {activeFamily?.id !== f.id &&
-                            f.ownerId === user.uid &&
-                            activeHousehold.ownerId === user.uid && (
-                              <button
-                                type="button"
-                                onClick={() => void handleLinkHouseholdToFamily(f)}
-                                className="min-h-[36px] px-3 text-xs font-medium text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 hover:bg-teal-50 dark:hover:bg-teal-950/40 rounded-lg"
+                            {activeFamily?.id !== f.id &&
+                              f.ownerId === user.uid &&
+                              activeHousehold.ownerId === user.uid && (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleLinkHouseholdToFamily(f)}
+                                  className="min-h-[36px] px-3 text-xs font-medium text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 hover:bg-teal-50 dark:hover:bg-teal-950/40 rounded-lg"
+                                >
+                                  Link this household
+                                </button>
+                              )}
+                          </div>
+                          <div className="px-3 space-y-1.5">
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
+                              Head of the family: {familyHeadName(f)} — the eldest living
+                              counted person. The roster counts people, not just accounts:
+                              cousins who never open the app are family too, and nobody is
+                              taken off it when they die. The family doesn't forget.
+                            </p>
+                            {(f.people || []).map((person, idx) => (
+                              <div
+                                key={idx}
+                                className="flex items-center justify-between gap-2 text-xs text-slate-600 dark:text-slate-400"
                               >
-                                Link this household
-                              </button>
+                                <span>
+                                  {person.name}
+                                  {person.birthYear ? ` · born ${person.birthYear}` : ''}
+                                  {person.living === false ? ' · remembered' : ''}
+                                  {familyHeadName(f) === person.name && person.living !== false
+                                    ? ' · head'
+                                    : ''}
+                                </span>
+                                {f.ownerId === user.uid && (
+                                  <span className="flex gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        void handleSetFamilyPersonLiving(f, idx, person.living === false)
+                                      }
+                                      className="min-h-[30px] px-2 text-[11px] font-medium text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-md"
+                                    >
+                                      {person.living === false ? 'Mark living' : 'Mark as passed'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleRemoveFamilyPerson(f, idx)}
+                                      className="min-h-[30px] px-2 text-[11px] font-medium text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 rounded-md"
+                                    >
+                                      Remove
+                                    </button>
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                            {f.ownerId === user.uid && (
+                              <div className="flex gap-2 pt-1">
+                                <input
+                                  type="text"
+                                  value={personNameDraft}
+                                  onChange={(e) => setPersonNameDraft(e.target.value)}
+                                  placeholder="Count a person — name"
+                                  className="flex-1 min-h-[38px] px-3 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                                />
+                                <input
+                                  type="number"
+                                  value={personYearDraft}
+                                  onChange={(e) => setPersonYearDraft(e.target.value)}
+                                  placeholder="Born (year)"
+                                  className="w-28 min-h-[38px] px-3 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => void handleAddFamilyPerson(f)}
+                                  className="min-h-[38px] px-3 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-lg"
+                                >
+                                  Add
+                                </button>
+                              </div>
                             )}
+                          </div>
                         </div>
                       ))
                     )}

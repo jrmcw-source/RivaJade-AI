@@ -140,6 +140,15 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
 
   function openEditComposer(task: ScheduleTask) {
     setEditingTaskId(task.id);
+    setFormVisibility(
+      task.scope === 'private'
+        ? 'private'
+        : task.scope === 'family'
+          ? `family:${task.familyId || ''}`
+          : task.scope === 'circles' && task.circleIds?.length
+            ? `circle:${task.circleIds[0]}`
+            : 'household'
+    );
     setFormTitle(task.title);
     setFormType(task.type);
     setFormCategory(task.category);
@@ -154,6 +163,26 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
     setComposerOpen(true);
   }
 
+  function visibilityFields(): Partial<ScheduleTask> {
+    if (formVisibility === 'private')
+      return { scope: 'private', familyId: '', circleIds: [] };
+    if (formVisibility.startsWith('family:'))
+      return {
+        scope: 'family',
+        familyId: formVisibility.slice('family:'.length),
+        circleIds: [],
+      };
+    if (formVisibility.startsWith('circle:'))
+      return {
+        scope: 'circles',
+        familyId: '',
+        circleIds: [formVisibility.slice('circle:'.length)],
+      };
+    if (formVisibility === 'household')
+      return { scope: 'household', familyId: '', circleIds: [] };
+    return {};
+  }
+
   async function handleSaveComposer(e: React.FormEvent) {
     e.preventDefault();
     if (!formTitle.trim()) return;
@@ -161,6 +190,7 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
     try {
       if (editingTaskId) {
         await onUpdateTask(editingTaskId, {
+          ...visibilityFields(),
           title: formTitle.trim(),
           type: formType,
           category: formCategory,
@@ -179,21 +209,7 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
           type: formType,
           category: formCategory,
           place: formPlace,
-          ...(formVisibility === 'private'
-            ? { scope: 'private' as const, familyId: '', circleIds: [] as string[] }
-            : formVisibility.startsWith('family:')
-              ? {
-                  scope: 'family' as const,
-                  familyId: formVisibility.slice('family:'.length),
-                  circleIds: [] as string[],
-                }
-              : formVisibility.startsWith('circle:')
-                ? {
-                    scope: 'circles' as const,
-                    familyId: '',
-                    circleIds: [formVisibility.slice('circle:'.length)],
-                  }
-                : {}),
+          ...visibilityFields(),
           dueDate: formDueDate,
           dueTime: formDueTime,
           estimatedMinutes: Number(formEstimatedMinutes) || 30,
@@ -357,19 +373,33 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
     return cells;
   }, [currentMonth]);
 
+  // The three calendars (Jason, 2026-11-20): one pool of tasks, three
+  // rings to view it by. Family shows what was aimed at the family,
+  // Household the household's own, Just me what only I can see.
+  // Circles ride along in All — a circle is an overlay, not a ring.
+  const [calendarView, setCalendarView] = useState<'all' | 'family' | 'household' | 'mine'>('all');
+  const ringTasks = useMemo(() => {
+    if (calendarView === 'family') return tasks.filter((t) => t.scope === 'family');
+    if (calendarView === 'household')
+      return tasks.filter((t) => !t.scope || t.scope === 'household');
+    if (calendarView === 'mine')
+      return tasks.filter((t) => t.scope === 'private' || t.householdId === '');
+    return tasks;
+  }, [tasks, calendarView]);
+
   const tasksByDate = useMemo(() => {
     const map = new Map<string, ScheduleTask[]>();
-    for (const t of tasks) {
+    for (const t of ringTasks) {
       const list = map.get(t.dueDate) || [];
       list.push(t);
       map.set(t.dueDate, list);
     }
     return map;
-  }, [tasks]);
+  }, [ringTasks]);
 
   const filteredTasks = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return tasks
+    return ringTasks
       .filter((t) => {
         if (!showAllDates && t.dueDate !== selectedDate) return false;
         if (categoryFilter !== 'All' && t.category !== categoryFilter) return false;
@@ -384,7 +414,7 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
         if (a.status !== b.status) return a.status === 'pending' ? -1 : 1;
         return a.dueDate.localeCompare(b.dueDate) || (a.dueTime || '99:99').localeCompare(b.dueTime || '99:99');
       });
-  }, [tasks, showAllDates, selectedDate, categoryFilter, statusFilter, searchQuery]);
+  }, [ringTasks, showAllDates, selectedDate, categoryFilter, statusFilter, searchQuery]);
 
   const monthLabel = currentMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 
@@ -683,6 +713,29 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
           <div className="lg:col-span-7 space-y-4">
             {/* Search & Filters */}
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-3">
+              <div className="inline-flex p-1 bg-slate-100 dark:bg-slate-800 rounded-lg">
+                {(
+                  [
+                    { id: 'all', label: 'All' },
+                    { id: 'family', label: 'Family calendar' },
+                    { id: 'household', label: 'Household calendar' },
+                    { id: 'mine', label: 'My calendar' },
+                  ] as const
+                ).map((v) => (
+                  <button
+                    key={v.id}
+                    type="button"
+                    onClick={() => setCalendarView(v.id)}
+                    className={`min-h-[36px] px-3 text-xs font-medium rounded-md transition-colors ${
+                      calendarView === v.id
+                        ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-300 shadow-sm'
+                        : 'text-slate-500 dark:text-slate-400'
+                    }`}
+                  >
+                    {v.label}
+                  </button>
+                ))}
+              </div>
               <div className="flex flex-col sm:flex-row gap-3">
                 <input
                   type="search"
@@ -1276,7 +1329,9 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
               </select>
             </div>
 
-            {!editingTaskId && visibilityOptions.length > 0 && (
+            {visibilityOptions.length > 0 &&
+              (!editingTaskId ||
+                tasks.find((t) => t.id === editingTaskId)?.userId === userProfile?.userId) && (
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
                   Who can see this?

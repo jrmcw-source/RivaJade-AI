@@ -467,8 +467,35 @@ export interface Family {
   ownerId: string;
   ownerName: string;
   memberIds: string[];
+  // The counted people (Jason, 2026-11-20): the family roster holds
+  // people, not just accounts — cousins who never open the app are
+  // family too. Headship of the giant circle descends by seniority
+  // among the living counted people, and the roster doesn't forget:
+  // a person who has died stays on it, marked.
+  people?: FamilyPerson[];
   createdAt?: unknown;
   updatedAt?: unknown;
+}
+
+// One counted person on a family's roster. birthYear is what
+// seniority is figured from; living=false marks someone the family
+// has lost (they stay on the roster — the circle doesn't forget).
+export interface FamilyPerson {
+  name: string;
+  birthYear?: number;
+  living?: boolean;
+  userId?: string;
+}
+
+// The head of a family, derived — never appointed by a button: the
+// eldest living counted person. Falls back to the family's owner
+// name when no counted people carry a birth year yet.
+export function familyHeadName(family: Family): string {
+  const living = (family.people || []).filter(
+    (p) => p.living !== false && typeof p.birthYear === 'number'
+  );
+  if (living.length === 0) return family.ownerName || '';
+  return living.reduce((a, b) => ((a.birthYear || 9999) <= (b.birthYear || 9999) ? a : b)).name;
 }
 
 // A circle (Jason, 2026-11-20): a set of people, drawn by a user —

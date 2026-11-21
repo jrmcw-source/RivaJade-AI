@@ -999,6 +999,7 @@ service cloud.firestore {
           'ownerId',
           'ownerName',
           'memberIds',
+                    'people',
           'createdAt',
           'updatedAt'
         ])
@@ -1011,6 +1012,7 @@ service cloud.firestore {
         && isBoundedStringList(data.memberIds, 100, 128)
         && data.memberIds.size() >= 1
         && data.ownerId in data.memberIds
+        && (!('people' in data) || (data.people is list && data.people.size() <= 100))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -1566,7 +1568,7 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && existing().ownerId == request.auth.uid
-        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'memberIds', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'memberIds', 'people', 'updatedAt']);
       allow delete: if isVerifiedUser() && isValidId(familyId) && existing().ownerId == request.auth.uid;
     }
 
