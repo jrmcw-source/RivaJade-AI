@@ -196,6 +196,35 @@ export function isDeepArchivedFinanceEntry(entryDate: string, todayIso: string):
 export function isPlaceName(value: unknown): value is PlaceName {
   return typeof value === 'string' && (PLACES as readonly string[]).includes(value);
 }
+// Record kinds (Jason, 2026-11-21): the rigid list. A record is
+// Financial, Medical, a Calendar Event, Personal, or Customizable
+// — the family's own kind, named in customKindLabel. Two kinds are
+// rigid by nature: money records are Financial and tasks are
+// Calendar Events. Papers and property records carry the filing
+// choice, and Personal is the default. The topic categories above
+// keep doing the fine sorting underneath (a doctor's visit is a
+// Calendar Event whose topic is Health & Medical).
+export type RecordKind = 'financial' | 'medical' | 'calendar' | 'personal' | 'custom';
+
+export const RECORD_KIND_LABELS: Record<RecordKind, string> = {
+  financial: 'Financial',
+  medical: 'Medical',
+  calendar: 'Calendar Event',
+  personal: 'Personal',
+  custom: 'Customizable',
+};
+
+// The kind a stored record carries, by where it lives: the rigid
+// kinds by collection, the filed kinds by the record's own tag.
+export function effectiveRecordKind(
+  coll: 'tasks' | 'documents' | 'finances' | 'property' | 'notes',
+  rec: { recordKind?: RecordKind }
+): RecordKind {
+  if (coll === 'tasks') return 'calendar';
+  if (coll === 'finances') return 'financial';
+  return rec.recordKind || 'personal';
+}
+
 export type TaskType = 'task' | 'appointment';
 export type TaskPriority = 'low' | 'medium' | 'high';
 export type TaskStatus = 'pending' | 'completed';
@@ -291,6 +320,11 @@ export interface ScannedDocument {
   scope?: 'private' | 'household' | 'family' | 'circles';
   familyId?: string;
   circleIds?: string[];
+  // The record kind (Jason, 2026-11-21): how this paper is filed —
+  // Financial, Medical, Personal, or the family's own Custom kind
+  // (named in customKindLabel). Absent means Personal.
+  recordKind?: RecordKind;
+  customKindLabel?: string;
   title: string;
   category: Category;
   place: string;
@@ -386,6 +420,20 @@ export interface MailBriefing {
   updatedAt?: unknown;
 }
 
+// One reader's circle add-on (Jason, 2026-11-21): drawn from the
+// records that reader's family ring and circles hold, saved where
+// only that reader can see it — the same privacy shape as the mail
+// add-on, a different well.
+export interface CircleBriefing {
+  id: string;
+  userId: string;
+  householdId: string;
+  dateKey: string;
+  text: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
 export interface SharedProject {
   id: string;
   projectId: string;
@@ -442,6 +490,11 @@ export interface Household {
   calendarToken?: string;
   // The family this household belongs to, if any (Jason, 2026-11-20).
   familyId?: string;
+  // Money and circles (Jason, 2026-11-21): the head of household's
+  // switch for letting this household's finance records be seen
+  // through circles at all. Caution is the default — absent or
+  // false means finances stay inside the household and family rings.
+  allowPartnerFinances?: boolean;
   createdAt?: unknown;
   updatedAt?: unknown;
 }
@@ -467,6 +520,31 @@ export interface Family {
   ownerId: string;
   ownerName: string;
   memberIds: string[];
+  // How the head is settled (Jason, 2026-11-21): 'seniority' derives
+  // it by age and blood from the counted people; 'chosen' records
+  // the family's own choice in headNames (one name, or two for
+  // co-heads — a couple heading together). The app records the
+  // choice; it does not run the ballot.
+  headMode?: 'seniority' | 'chosen';
+  headNames?: string[];
+  // The responsible age (Jason, 2026-11-21): the age at which a
+  // family member becomes an adult in the app's eyes and enters the
+  // family's read/write stream on their own. The law's number is
+  // 18 and that is the default; a family may choose otherwise, in
+  // general here or for one person on the roster. Birthdates are a
+  // record with consequences: reaching the age is what turns the
+  // stream on, unless the head has said otherwise for that person.
+  responsibleAge?: number;
+  // Maintained by the family's owner from the roster (the rules
+  // mirror against these lists; they are recomputed whenever the
+  // roster, the setting, or the calendar changes a person's
+  // standing): members not yet in the full stream, and the subset
+  // of them a parent has said may write to the family calendar.
+  // Children — anyone not yet responsible — can always SEE the
+  // family calendar; they cannot see finances, and they cannot
+  // write to the calendar unless a parent grants it.
+  notYetIds?: string[];
+  childWriterIds?: string[];
   // The counted people (Jason, 2026-11-20): the family roster holds
   // people, not just accounts — cousins who never open the app are
   // family too. Headship of the giant circle descends by seniority
@@ -483,19 +561,111 @@ export interface Family {
 export interface FamilyPerson {
   name: string;
   birthYear?: number;
+  // The full birthdate when the family knows it (YYYY-MM-DD). The
+  // responsible age is figured from this when present, else from
+  // January 1 of the birth year.
+  birthDate?: string;
   living?: boolean;
   userId?: string;
+  // This person's standing (Jason, 2026-11-21): absent or 'auto'
+  // means the age decides; 'yes' puts them in the stream whatever
+  // their age; 'no' holds them out whatever their age — the head
+  // choosing otherwise. responsibleAge overrides the family's age
+  // for this one person. canWriteCalendar is a parent's narrower
+  // grant: a child who may add to the family calendar while still
+  // outside the full stream.
+  responsibility?: 'auto' | 'yes' | 'no';
+  responsibleAge?: number;
+  canWriteCalendar?: boolean;
+  // Headship ranks by age and blood (Jason, 2026-11-21): blood is
+  // the default (undefined counts as blood); blood=false marks
+  // someone family by marriage or by choice. A courtesy member is
+  // present in the circle but unranked — they never take the head
+  // by seniority (Mom in Derek's circle; Derek still heads his own).
+  blood?: boolean;
+  courtesy?: boolean;
 }
 
 // The head of a family, derived — never appointed by a button: the
 // eldest living counted person. Falls back to the family's owner
 // name when no counted people carry a birth year yet.
 export function familyHeadName(family: Family): string {
-  const living = (family.people || []).filter(
-    (p) => p.living !== false && typeof p.birthYear === 'number'
+  if (family.headMode === 'chosen' && family.headNames && family.headNames.length > 0) {
+    return family.headNames.join(' & ');
+  }
+  const ranked = (family.people || []).filter(
+    (p) => p.living !== false && !p.courtesy && typeof p.birthYear === 'number'
   );
-  if (living.length === 0) return family.ownerName || '';
-  return living.reduce((a, b) => ((a.birthYear || 9999) <= (b.birthYear || 9999) ? a : b)).name;
+  const blood = ranked.filter((p) => p.blood !== false);
+  const pool = blood.length > 0 ? blood : ranked;
+  if (pool.length === 0) return family.ownerName || '';
+  return pool.reduce((a, b) => ((a.birthYear || 9999) <= (b.birthYear || 9999) ? a : b)).name;
+}
+
+// The family's responsible age: the family's own number when it
+// has chosen one, else the legal default of 18.
+export function familyResponsibleAge(family: Family): number {
+  return typeof family.responsibleAge === 'number' && family.responsibleAge > 0
+    ? family.responsibleAge
+    : 18;
+}
+
+// The day a person enters the stream under the age rule alone, as
+// an ISO date, or null when their birth isn't recorded well enough
+// to say. A February 29 birthday lands on February 28 in years
+// without one.
+export function personResponsibleDate(family: Family, person: FamilyPerson): string | null {
+  const birth =
+    person.birthDate ||
+    (typeof person.birthYear === 'number' ? `${person.birthYear}-01-01` : '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(birth)) return null;
+  const age =
+    typeof person.responsibleAge === 'number' && person.responsibleAge > 0
+      ? person.responsibleAge
+      : familyResponsibleAge(family);
+  const year = Number(birth.slice(0, 4)) + age;
+  let monthDay = birth.slice(5);
+  if (monthDay === '02-29') {
+    const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+    if (!leap) monthDay = '02-28';
+  }
+  return `${year}-${monthDay}`;
+}
+
+// Is this counted person in the family's read/write stream today?
+// The head's word for the person beats the calendar; the calendar
+// beats everything else. No recorded birth means the age can't
+// speak — the head's 'yes' is the way in.
+export function personIsResponsible(
+  family: Family,
+  person: FamilyPerson,
+  todayKey: string
+): boolean {
+  if (person.responsibility === 'yes') return true;
+  if (person.responsibility === 'no') return false;
+  const on = personResponsibleDate(family, person);
+  return on !== null && todayKey >= on;
+}
+
+// The maintained lists on the family doc, figured from the roster:
+// members whose linked person is not yet responsible, and which of
+// them a parent has granted the family calendar. A member with no
+// linked person on the roster is treated as grown — the roster is
+// where childhood is recorded.
+export function computeStreamLists(
+  family: Family,
+  todayKey: string
+): { notYetIds: string[]; childWriterIds: string[] } {
+  const notYetIds: string[] = [];
+  const childWriterIds: string[] = [];
+  for (const uid of family.memberIds || []) {
+    const person = (family.people || []).find((x) => x.userId === uid);
+    if (!person) continue;
+    if (personIsResponsible(family, person, todayKey)) continue;
+    notYetIds.push(uid);
+    if (person.canWriteCalendar) childWriterIds.push(uid);
+  }
+  return { notYetIds, childWriterIds };
 }
 
 // A circle (Jason, 2026-11-20): a set of people, drawn by a user —
@@ -509,8 +679,32 @@ export interface Circle {
   memberIds: string[];
   temporary: boolean;
   expiresAtKey?: string;
+  // Headship (Jason, 2026-11-21): 'seniority' leaves the head as
+  // the circle's owner unless the family roster says otherwise;
+  // 'chosen' names the head(s) in headIds — one person, or two
+  // co-heads. The head(s) hold the omission switches below.
+  headMode?: 'seniority' | 'chosen';
+  headIds?: string[];
+  // The head's omissions (Jason, 2026-11-21): access inside a
+  // circle is even by default — default on — and the head can omit
+  // people from seeing (omitViewIds), from writing or submitting
+  // (omitWriteIds), or whole kinds of records from the circle's
+  // views (omitKinds speaks the record kinds: 'financial' |
+  // 'medical' | 'calendar' | 'personal' | 'custom').
+  omitViewIds?: string[];
+  omitWriteIds?: string[];
+  omitKinds?: string[];
   createdAt?: unknown;
   updatedAt?: unknown;
+}
+
+// Who heads a circle, as user ids: the chosen head(s) when the
+// circle names them, otherwise its owner.
+export function circleHeadIds(circle: Circle): string[] {
+  if (circle.headMode === 'chosen' && circle.headIds && circle.headIds.length > 0) {
+    return circle.headIds;
+  }
+  return [circle.ownerId];
 }
 
 export interface ProjectInvite {
@@ -581,6 +775,11 @@ export interface PropertyEntry {
   scope?: 'private' | 'household' | 'family' | 'circles';
   familyId?: string;
   circleIds?: string[];
+  // The record kind (Jason, 2026-11-21): how this entry is filed —
+  // Financial, Medical, Personal, or the family's own Custom kind
+  // (named in customKindLabel). Absent means Personal.
+  recordKind?: RecordKind;
+  customKindLabel?: string;
   area: PropertyEntryArea;
   place: string;
   title: string;

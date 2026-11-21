@@ -11,7 +11,15 @@ import {
   X,
 } from 'lucide-react';
 import {
+  Circle,
+  CircleBriefing,
+  Family,
   FinanceEntry,
+  Household,
+  HouseholdMember,
+  JasonNote,
+  MailBriefing,
+  MorningBriefing,
   PropertyEntry,
   ScannedDocument,
   ScheduleTask,
@@ -60,6 +68,16 @@ interface GoogleDriveBackupModalProps {
   propertyEntries: PropertyEntry[];
   financeEntries: FinanceEntry[];
   voiceMemories: VoiceMemory[];
+  // Backup everything (Jason, 2026-11-21): the whole desk rides
+  // along in the workspace snapshot — structure and all.
+  households?: Household[];
+  householdMembers?: HouseholdMember[];
+  families?: Family[];
+  circles?: Circle[];
+  jasonNotes?: JasonNote[];
+  briefings?: MorningBriefing[];
+  mailBriefings?: MailBriefing[];
+  circleBriefings?: CircleBriefing[];
   onRestoreSnapshot: (snapshot: WorkspaceBackupSnapshot) => Promise<{ importedCount: number }>;
   onLinkDocumentPhoto?: (docId: string, driveFileId: string) => Promise<void>;
 }
@@ -99,6 +117,14 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
   propertyEntries,
   financeEntries,
   voiceMemories,
+  households,
+  householdMembers,
+  families,
+  circles,
+  jasonNotes,
+  briefings,
+  mailBriefings,
+  circleBriefings,
   onRestoreSnapshot,
   onLinkDocumentPhoto,
 }) => {
@@ -168,6 +194,14 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
           propertyEntries,
           financeEntries,
           voiceMemories,
+          households,
+          householdMembers,
+          families,
+          circles,
+          jasonNotes,
+          briefings,
+          mailBriefings,
+          circleBriefings,
         }),
       };
     }
@@ -411,7 +445,7 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
                 Google Drive Backups
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Save snapshots of your schedule, OCR vault, Wimberley property logs, and finances into &ldquo;Steward Backups&rdquo;.
+                Save snapshots of the whole desk — schedule, papers, property logs, finances, notes, briefings, and the families, circles, and households themselves — into &ldquo;Steward Backups&rdquo;.
               </p>
             </div>
           </div>

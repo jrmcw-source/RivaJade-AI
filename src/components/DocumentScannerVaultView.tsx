@@ -20,6 +20,8 @@ import {
   isPlaceName,
   Category,
   ScannedDocument,
+  RecordKind,
+  RECORD_KIND_LABELS,
   ScheduleTask,
   getLocalTodayIso,
 } from '../types';
@@ -142,6 +144,8 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
     notes: string;
     paperLocation: string;
     place: string;
+    recordKind: RecordKind;
+    customKindLabel: string;
   } | null>(null);
   const [newTagInput, setNewTagInput] = useState('');
   const [savingDoc, setSavingDoc] = useState(false);
@@ -150,6 +154,8 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
   const [editTagInput, setEditTagInput] = useState('');
   const [paperLocationInput, setPaperLocationInput] = useState('');
   const [placeInput, setPlaceInput] = useState('');
+  const [kindInput, setKindInput] = useState<RecordKind>('personal');
+  const [customKindInput, setCustomKindInput] = useState('');
   const [editingOcrText, setEditingOcrText] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -324,6 +330,8 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
         selectedTaskIndices: selectedMap,
         notes: '',
         paperLocation: '',
+        recordKind: 'personal',
+        customKindLabel: '',
         place:
           scannerPresetPlace && isPlaceName(scannerPresetPlace)
             ? scannerPresetPlace
@@ -356,6 +364,9 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
         notes: draftResult.notes,
         paperLocation: draftResult.paperLocation,
         place: draftResult.place,
+        recordKind: draftResult.recordKind,
+        customKindLabel:
+          draftResult.recordKind === 'custom' ? draftResult.customKindLabel.trim().slice(0, 60) : '',
       });
 
       // Schedule checked suggested tasks linked to this document
@@ -436,6 +447,8 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
   useEffect(() => {
     setPaperLocationInput(selectedDoc?.paperLocation || '');
     setPlaceInput(selectedDoc?.place || '');
+    setKindInput(selectedDoc?.recordKind || 'personal');
+    setCustomKindInput(selectedDoc?.customKindLabel || '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDocId]);
 
@@ -732,13 +745,40 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
                     </option>
                   ))}
                 </select>
+                <select
+                  value={kindInput}
+                  onChange={(e) => setKindInput(e.target.value as RecordKind)}
+                  aria-label="Kind of record"
+                  className="flex-1 min-h-[40px] px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                >
+                  {(Object.keys(RECORD_KIND_LABELS) as RecordKind[])
+                    .filter((k) => k !== 'calendar')
+                    .map((k) => (
+                      <option key={k} value={k}>
+                        {RECORD_KIND_LABELS[k]}
+                      </option>
+                    ))}
+                </select>
               </div>
+              {kindInput === 'custom' && (
+                <input
+                  type="text"
+                  value={customKindInput}
+                  onChange={(e) => setCustomKindInput(e.target.value)}
+                  placeholder="Name your kind — e.g., Official"
+                  aria-label="Name for the custom kind"
+                  className="w-full min-h-[40px] px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                />
+              )}
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
                   void onUpdateDocument(selectedDoc.id, {
                     paperLocation: paperLocationInput.trim(),
                     place: placeInput,
+                    recordKind: kindInput,
+                    customKindLabel:
+                      kindInput === 'custom' ? customKindInput.trim().slice(0, 60) : '',
                   });
                 }}
                 className="flex gap-2"
@@ -1150,6 +1190,48 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
                       ))}
                     </select>
                   </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                      Kind of record
+                    </label>
+                    <select
+                      value={draftResult.recordKind}
+                      onChange={(e) =>
+                        setDraftResult({
+                          ...draftResult,
+                          recordKind: e.target.value as RecordKind,
+                        })
+                      }
+                      className="w-full min-h-[42px] px-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                    >
+                      {(Object.keys(RECORD_KIND_LABELS) as RecordKind[])
+                        .filter((k) => k !== 'calendar')
+                        .map((k) => (
+                          <option key={k} value={k}>
+                            {RECORD_KIND_LABELS[k]}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                  {draftResult.recordKind === 'custom' && (
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                        Name your kind
+                      </label>
+                      <input
+                        type="text"
+                        value={draftResult.customKindLabel}
+                        onChange={(e) =>
+                          setDraftResult({ ...draftResult, customKindLabel: e.target.value })
+                        }
+                        placeholder="e.g., Official — deeds, titles, filings"
+                        className="w-full min-h-[42px] px-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-1">

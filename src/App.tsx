@@ -68,6 +68,13 @@ import {
   JasonNote,
   MorningBriefing,
   MailBriefing,
+  RecordKind,
+  CircleBriefing,
+  circleHeadIds,
+  computeStreamLists,
+  effectiveRecordKind,
+  familyResponsibleAge,
+  personIsResponsible,
   Family,
   FamilyPerson,
   Circle,
@@ -98,6 +105,9 @@ import { AIAssistantDrawer } from './components/AIAssistantDrawer';
 import { FrontDoorView, FrontDoorDeskId } from './components/FrontDoorView';
 import { TreeView } from './components/TreeView';
 import {
+  buildWorkspaceJsonBackup,
+  createDriveBackupFile,
+  ensureStewardBackupFolder,
   ensureStewardPhotosFolder,
   listDriveBackups,
   uploadDriveBinaryFile,
@@ -198,6 +208,18 @@ function withMailBriefingDefaults(
   };
 }
 
+function withCircleBriefingDefaults(
+  rec: Omit<CircleBriefing, 'id'>
+): Omit<CircleBriefing, 'id'> {
+  return {
+    ...rec,
+    userId: rec.userId || '',
+    householdId: rec.householdId || '',
+    dateKey: rec.dateKey || '',
+    text: rec.text || '',
+  };
+}
+
 function withFamilyDefaults(rec: Omit<Family, 'id'>): Omit<Family, 'id'> {
   return {
     ...rec,
@@ -217,6 +239,10 @@ function withCircleDefaults(rec: Omit<Circle, 'id'>): Omit<Circle, 'id'> {
     memberIds: rec.memberIds || [],
     temporary: Boolean(rec.temporary),
     expiresAtKey: rec.expiresAtKey || '',
+    headIds: rec.headIds || [],
+    omitViewIds: rec.omitViewIds || [],
+    omitWriteIds: rec.omitWriteIds || [],
+    omitKinds: rec.omitKinds || [],
   };
 }
 
@@ -280,6 +306,7 @@ function MainApp() {
   const [ownBriefings, setOwnBriefings] = useState<MorningBriefing[]>([]);
   const [sharedBriefings, setSharedBriefings] = useState<MorningBriefing[]>([]);
   const [ownMailBriefings, setOwnMailBriefings] = useState<MailBriefing[]>([]);
+  const [ownCircleBriefings, setOwnCircleBriefings] = useState<CircleBriefing[]>([]);
   const [families, setFamilies] = useState<Family[]>([]);
   const [circles, setCircles] = useState<Circle[]>([]);
   const [households, setHouseholds] = useState<Household[]>([]);
@@ -553,6 +580,19 @@ function MainApp() {
       (err) => handleFirestoreError(err, OperationType.LIST, 'mailBriefings')
     );
 
+    const unsubCircleBriefings = onSnapshot(
+      query(collection(db, 'circleBriefings'), where('userId', '==', user.uid)),
+      (snap) => {
+        setOwnCircleBriefings(
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...withCircleBriefingDefaults(d.data() as Omit<CircleBriefing, 'id'>),
+          }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'circleBriefings')
+    );
+
     const unsubFamilies = onSnapshot(
       query(collection(db, 'families'), where('memberIds', 'array-contains', user.uid)),
       (snap) => {
@@ -740,6 +780,7 @@ function MainApp() {
       unsubBriefings();
       unsubBriefingsShared();
       unsubMailBriefings();
+      unsubCircleBriefings();
       unsubFamilies();
       unsubCircles();
       unsubProjects();
@@ -880,28 +921,115 @@ function MainApp() {
     !activeHousehold ||
     hid === activeHousehold.householdId ||
     !households.some((h) => h.householdId === hid);
+  // Whether a circle-scoped record reaches me through its circles
+  // (Jason, 2026-11-21): the head's omissions bind here — a circle
+  // that omitted me from its views, or omitted this kind of record,
+  // does not carry the record to me. My own deposits always reach
+  // me. New stamps already leave omitted viewers out; this covers
+  // stamps written before an omission existed.
+  function memberDisplayName(uid: string): string {
+    if (user && uid === user.uid) return 'You';
+    return householdMembers.find((m) => m.userId === uid)?.displayName || 'A member';
+  }
+
+  function circleRecordVisible(
+    rec: { userId: string; circleIds?: string[]; recordKind?: RecordKind },
+    kind: 'tasks' | 'documents' | 'finances' | 'property' | 'notes'
+  ): boolean {
+    if (!user || rec.userId === user.uid) return true;
+    const ids = rec.circleIds || [];
+    if (ids.length === 0) return true;
+    // Omissions speak the record kinds (Jason, 2026-11-21):
+    // Financial, Medical, Calendar Event, Personal, Customizable.
+    const effKind = effectiveRecordKind(kind, rec);
+    return ids.some((cid) => {
+      const c = circles.find((x) => x.id === cid);
+      if (!c || !c.memberIds.includes(user.uid)) return false;
+      if ((c.omitViewIds || []).includes(user.uid)) return false;
+      if ((c.omitKinds || []).includes(effKind)) return false;
+      return true;
+    });
+  }
+
+  // Whether a family-scoped record reaches me (Jason, 2026-11-21):
+  // outside the calendar, the family stream is the gate — a member
+  // on the family's not-yet list does not see money, papers,
+  // property, or notes aimed at the family. The calendar itself is
+  // the exception: children see it. My own deposits always reach me.
+  function familyRecordVisible(rec: { userId: string; familyId?: string }): boolean {
+    if (!user || rec.userId === user.uid) return true;
+    const fam = families.find((f) => f.id === (rec.familyId || ''));
+    if (!fam) return true;
+    return !(fam.notYetIds || []).includes(user.uid);
+  }
+
   const visibleTasks = useMemo(
-    () => tasks.filter((t) => householdInScope(t.householdId) || (t.scope && t.scope !== 'household')),
+    () =>
+      tasks.filter(
+        (t) =>
+          householdInScope(t.householdId) ||
+          (t.scope &&
+            t.scope !== 'household' &&
+            (t.scope !== 'circles' || circleRecordVisible(t, 'tasks')))
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [tasks, activeHousehold, households]
   );
   const visibleDocuments = useMemo(
-    () => documents.filter((d) => householdInScope(d.householdId) || (d.scope && d.scope !== 'household')),
+    () =>
+      documents.filter(
+        (d) =>
+          householdInScope(d.householdId) ||
+          (d.scope &&
+            d.scope !== 'household' &&
+            (d.scope !== 'circles' || circleRecordVisible(d, 'documents')) &&
+            (d.scope !== 'family' || familyRecordVisible(d)))
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [documents, activeHousehold, households]
   );
   const visiblePropertyEntries = useMemo(
-    () => propertyEntries.filter((p) => householdInScope(p.householdId) || (p.scope && p.scope !== 'household')),
+    () =>
+      propertyEntries.filter(
+        (e) =>
+          householdInScope(e.householdId) ||
+          (e.scope &&
+            e.scope !== 'household' &&
+            (e.scope !== 'circles' || circleRecordVisible(e, 'property')) &&
+            (e.scope !== 'family' || familyRecordVisible(e)))
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [propertyEntries, activeHousehold, households]
   );
   const visibleFinanceEntries = useMemo(
-    () => financeEntries.filter((f) => householdInScope(f.householdId) || (f.scope && f.scope !== 'household')),
+    () =>
+      financeEntries.filter((e) => {
+        if (householdInScope(e.householdId)) return true;
+        if (!e.scope || e.scope === 'household') return false;
+        if (e.scope === 'family') return familyRecordVisible(e);
+        if (e.scope !== 'circles') return true;
+        if (!circleRecordVisible(e, 'finances')) return false;
+        // Money through circles needs the origin household head's
+        // switch (Jason, 2026-11-21): caution is the default, and an
+        // unknown origin household counts as off. My own entries
+        // always reach me.
+        if (user && e.userId === user.uid) return true;
+        const origin = households.find((h) => h.householdId === e.householdId);
+        return Boolean(origin?.allowPartnerFinances);
+      }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [financeEntries, activeHousehold, households]
   );
   const visibleJasonNotes = useMemo(
-    () => jasonNotes.filter((n) => householdInScope(n.householdId) || (n.scope && n.scope !== 'household')),
+    () =>
+      jasonNotes.filter(
+        (n) =>
+          householdInScope(n.householdId) ||
+          (n.scope &&
+            n.scope !== 'household' &&
+            (n.scope !== 'circles' || circleRecordVisible(n, 'notes')) &&
+            (n.scope !== 'family' || familyRecordVisible(n)))
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [jasonNotes, activeHousehold, households]
   );
@@ -917,6 +1045,10 @@ function MainApp() {
   const todaysMailBriefing = useMemo(
     () => ownMailBriefings.find((b) => b.dateKey === localDateKey()) || null,
     [ownMailBriefings]
+  );
+  const todaysCircleBriefing = useMemo(
+    () => ownCircleBriefings.find((b) => b.dateKey === localDateKey()) || null,
+    [ownCircleBriefings]
   );
   const activeFamily = useMemo(
     () =>
@@ -1109,7 +1241,8 @@ function MainApp() {
     scope: string | undefined,
     familyId: string | undefined,
     circleIds: string[] | undefined,
-    originHouseholdId: string
+    originHouseholdId: string,
+    kind: string = 'tasks'
   ): { householdId: string; memberIds: string[]; scopeFields: Record<string, unknown> } | null {
     if (!user) return null;
     if (scope === 'private') {
@@ -1122,9 +1255,26 @@ function MainApp() {
     if (scope === 'family') {
       const fam = families.find((f) => f.id === (familyId || '')) || activeFamily;
       if (!fam || !fam.memberIds.includes(user.uid)) return null;
+      // The responsible age at work (Jason, 2026-11-21): children
+      // see the family calendar, so a task is stamped to the whole
+      // roster — but a child writes one only when a parent has
+      // granted it. Everything else is stamped to the stream alone
+      // (the roster minus the not-yet list), and a not-yet member
+      // cannot write it at all.
+      const notYet = fam.notYetIds || [];
+      const iAmNotYet = notYet.includes(user.uid);
+      if (kind === 'tasks') {
+        if (iAmNotYet && !(fam.childWriterIds || []).includes(user.uid)) return null;
+        return {
+          householdId: originHouseholdId,
+          memberIds: fam.memberIds.slice(0, 100),
+          scopeFields: { scope: 'family', familyId: fam.id, circleIds: [] },
+        };
+      }
+      if (iAmNotYet) return null;
       return {
         householdId: originHouseholdId,
-        memberIds: fam.memberIds.slice(0, 100),
+        memberIds: fam.memberIds.filter((id) => !notYet.includes(id)).slice(0, 100),
         scopeFields: { scope: 'family', familyId: fam.id, circleIds: [] },
       };
     }
@@ -1134,7 +1284,15 @@ function MainApp() {
       for (const cid of ids) {
         const c = circles.find((x) => x.id === cid);
         if (!c || !c.memberIds.includes(user.uid)) return null;
+        // The head's omissions (Jason, 2026-11-21): a circle that
+        // omits my writes takes no submissions from me, and people
+        // omitted from its views are left out of the stamp. My own
+        // deposit always stays visible to me — ownership first.
+        if ((c.omitWriteIds || []).includes(user.uid)) return null;
         c.memberIds.forEach((m) => audience.add(m));
+        (c.omitViewIds || []).forEach((m) => {
+          if (m !== user.uid) audience.delete(m);
+        });
       }
       return {
         householdId: originHouseholdId,
@@ -1617,12 +1775,33 @@ function MainApp() {
     }
   }
 
+  // The family's stream lists, figured from a candidate roster and
+  // membership — written alongside every change that could move a
+  // person's standing, so the rules mirror against fresh lists.
+  function streamFieldsFor(
+    fam: Family,
+    people: FamilyPerson[],
+    memberIds?: string[],
+    responsibleAge?: number
+  ): { notYetIds: string[]; childWriterIds: string[] } {
+    return computeStreamLists(
+      {
+        ...fam,
+        people,
+        memberIds: memberIds || fam.memberIds,
+        ...(typeof responsibleAge === 'number' ? { responsibleAge } : {}),
+      },
+      localDateKey()
+    );
+  }
+
   async function handleLinkHouseholdToFamily(family: Family) {
     if (!user || !activeHousehold) return;
     try {
       const merged = [...new Set([...family.memberIds, ...activeHousehold.memberIds])].slice(0, 100);
       await updateDoc(doc(db, 'families', family.id), {
         memberIds: merged,
+        ...streamFieldsFor(family, family.people || [], merged),
         updatedAt: serverTimestamp(),
       });
       await updateDoc(doc(db, 'households', activeHousehold.householdId), {
@@ -1637,34 +1816,99 @@ function MainApp() {
 
   const [personNameDraft, setPersonNameDraft] = useState('');
   const [personYearDraft, setPersonYearDraft] = useState('');
+  const [personKindDraft, setPersonKindDraft] = useState<'blood' | 'marriage' | 'courtesy'>('blood');
+  const [personDateDraft, setPersonDateDraft] = useState('');
+  const [personLinkDraft, setPersonLinkDraft] = useState('');
+  const [headDrafts, setHeadDrafts] = useState<Record<string, string>>({});
+  const [responsibleAgeDrafts, setResponsibleAgeDrafts] = useState<Record<string, string>>({});
 
   async function handleAddFamilyPerson(family: Family) {
     const name = personNameDraft.trim().slice(0, 80);
     if (!name) return;
-    const year = Number(personYearDraft);
+    // A birthdate is a record with consequences (Jason, 2026-11-21):
+    // it is what the responsible age is figured from. The year alone
+    // still counts — the age then turns on January 1 of that year.
+    const birthDate = /^\d{4}-\d{2}-\d{2}$/.test(personDateDraft) ? personDateDraft : '';
+    const year = birthDate ? Number(birthDate.slice(0, 4)) : Number(personYearDraft);
     const person: FamilyPerson = {
       name,
       ...(year >= 1850 && year <= 2100 ? { birthYear: year } : {}),
+      ...(birthDate ? { birthDate } : {}),
+      ...(personLinkDraft ? { userId: personLinkDraft } : {}),
       living: true,
+      // Standing (Jason, 2026-11-21): blood is the default; the
+      // toggles mark family by marriage or choice, and courtesy
+      // members, who are present but unranked for headship.
+      ...(personKindDraft === 'marriage' ? { blood: false } : {}),
+      ...(personKindDraft === 'courtesy' ? { courtesy: true } : {}),
     };
+    const people = [...(family.people || []), person].slice(0, 100);
     try {
       await updateDoc(doc(db, 'families', family.id), {
-        people: [...(family.people || []), person].slice(0, 100),
+        people,
+        ...streamFieldsFor(family, people),
         updatedAt: serverTimestamp(),
       });
       setPersonNameDraft('');
       setPersonYearDraft('');
+      setPersonDateDraft('');
+      setPersonLinkDraft('');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `families/${family.id}`);
+    }
+  }
+
+  // One person's standing, changed by the family's owner: the age
+  // override, the head's hold or grant, the calendar grant.
+  async function handleUpdateFamilyPerson(
+    family: Family,
+    idx: number,
+    patch: Partial<FamilyPerson>,
+    clearKeys: Array<keyof FamilyPerson> = []
+  ) {
+    const people = (family.people || []).map((person, i) => {
+      if (i !== idx) return person;
+      const next: FamilyPerson = { ...person, ...patch };
+      clearKeys.forEach((k) => delete next[k]);
+      return next;
+    });
+    try {
+      await updateDoc(doc(db, 'families', family.id), {
+        people,
+        ...streamFieldsFor(family, people),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `families/${family.id}`);
+    }
+  }
+
+  async function handleSaveResponsibleAge(family: Family) {
+    const raw = responsibleAgeDrafts[family.id];
+    const parsed = raw === undefined ? NaN : Number(raw);
+    const age = Number.isFinite(parsed) && parsed >= 1 && parsed <= 120 ? Math.floor(parsed) : 18;
+    try {
+      await updateDoc(doc(db, 'families', family.id), {
+        responsibleAge: age,
+        ...streamFieldsFor(family, family.people || [], undefined, age),
+        updatedAt: serverTimestamp(),
+      });
+      setFamilyFeedback(
+        `In ${family.name}, a member becomes responsible at ${age}. The stream lists have been refigured.`
+      );
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `families/${family.id}`);
     }
   }
 
   async function handleSetFamilyPersonLiving(family: Family, idx: number, living: boolean) {
+    const people = (family.people || []).map((person, i) =>
+      i === idx ? { ...person, living } : person
+    );
     try {
       await updateDoc(doc(db, 'families', family.id), {
-        people: (family.people || []).map((person, i) =>
-          i === idx ? { ...person, living } : person
-        ),
+        people,
+        ...streamFieldsFor(family, people),
         updatedAt: serverTimestamp(),
       });
     } catch (err) {
@@ -1673,13 +1917,120 @@ function MainApp() {
   }
 
   async function handleRemoveFamilyPerson(family: Family, idx: number) {
+    const people = (family.people || []).filter((_, i) => i !== idx);
     try {
       await updateDoc(doc(db, 'families', family.id), {
-        people: (family.people || []).filter((_, i) => i !== idx),
+        people,
+        ...streamFieldsFor(family, people),
         updatedAt: serverTimestamp(),
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `families/${family.id}`);
+    }
+  }
+
+  async function handleUpdateCircleFields(circle: Circle, fields: Record<string, unknown>) {
+    try {
+      await updateDoc(doc(db, 'circles', circle.id), {
+        ...fields,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `circles/${circle.id}`);
+    }
+  }
+
+  function handleToggleCircleOmit(
+    circle: Circle,
+    field: 'omitViewIds' | 'omitWriteIds',
+    memberId: string,
+    omitted: boolean
+  ) {
+    const current = circle[field] || [];
+    const next = omitted
+      ? [...new Set([...current, memberId])]
+      : current.filter((x) => x !== memberId);
+    void handleUpdateCircleFields(circle, { [field]: next });
+  }
+
+  function handleToggleCircleKind(circle: Circle, kind: string, omitted: boolean) {
+    const current = circle.omitKinds || [];
+    const next = omitted
+      ? [...new Set([...current, kind])]
+      : current.filter((x) => x !== kind);
+    void handleUpdateCircleFields(circle, { omitKinds: next });
+  }
+
+  function handleToggleCircleHead(circle: Circle, memberId: string, on: boolean) {
+    const current = circle.headIds || [];
+    let next = on ? [...new Set([...current, memberId])] : current.filter((x) => x !== memberId);
+    next = next.slice(0, 2);
+    void handleUpdateCircleFields(circle, {
+      headMode: next.length > 0 ? 'chosen' : 'seniority',
+      headIds: next,
+    });
+  }
+
+  // Eviction (Jason, 2026-11-21): the head of household can remove a
+  // member. Their access to the household's records ends with the
+  // roster; records carrying the old roster are re-stamped where the
+  // rules allow it, and their own deposits stay theirs, always.
+  async function handleEvictMember(member: HouseholdMember) {
+    if (!user || !activeHousehold || activeHousehold.ownerId !== user.uid) return;
+    if (member.userId === user.uid) return;
+    const hid = activeHousehold.householdId;
+    const oldRoster = activeHousehold.memberIds;
+    const newRoster = oldRoster.filter((id) => id !== member.userId);
+    const restamp = async (
+      coll: string,
+      recs: Array<{ id: string; householdId?: string; scope?: string; memberIds?: string[] }>
+    ) => {
+      for (const rec of recs) {
+        if (rec.householdId !== hid) continue;
+        if (rec.scope && rec.scope !== 'household') continue;
+        if (!rec.memberIds || rec.memberIds.length !== oldRoster.length) continue;
+        try {
+          await updateDoc(doc(db, coll, rec.id), {
+            memberIds: newRoster,
+            updatedAt: serverTimestamp(),
+          });
+        } catch {
+          // Another owner's record keeps its stamp until they touch
+          // it; the roster change still ends household access.
+        }
+      }
+    };
+    await restamp('tasks', tasks);
+    await restamp('documents', documents);
+    await restamp('financeEntries', financeEntries);
+    await restamp('propertyEntries', propertyEntries);
+    try {
+      await updateDoc(doc(db, 'households', hid), {
+        memberIds: newRoster,
+        updatedAt: serverTimestamp(),
+      });
+      try {
+        await deleteDoc(doc(db, 'households', hid, 'members', member.id));
+      } catch {
+        // The roster is the operative list; a lingering member card
+        // grants nothing on its own.
+      }
+      setHouseholdFeedback(
+        `${member.displayName} has been removed from this household. Their own records stay theirs.`
+      );
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `households/${hid}`);
+    }
+  }
+
+  async function handleTogglePartnerFinances(household: Household, on: boolean) {
+    try {
+      await updateDoc(doc(db, 'households', household.householdId), {
+        allowPartnerFinances: on,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `households/${household.householdId}`);
     }
   }
 
@@ -1847,6 +2198,233 @@ function MainApp() {
     }
   }
 
+  // Keeping the stream lists fresh (Jason, 2026-11-21): standing
+  // changes on its own as birthdays pass, so whenever a family I
+  // own is on screen, I refigure its lists from the roster. When
+  // the lists move — someone enters the stream, or is held back —
+  // that family's records are re-stamped to match: tasks to the
+  // whole roster (children see the calendar), everything else to
+  // the stream. Only my own deposits can be re-stamped by me;
+  // another owner's records are re-aimed when they next edit them.
+  const streamRefreshRef = useRef<Record<string, string>>({});
+  useEffect(() => {
+    if (!user) return;
+    const sameSet = (a: string[], b: string[]) =>
+      JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
+    for (const fam of families) {
+      if (fam.ownerId !== user.uid) continue;
+      const lists = computeStreamLists(fam, localDateKey());
+      if (
+        sameSet(lists.notYetIds, fam.notYetIds || []) &&
+        sameSet(lists.childWriterIds, fam.childWriterIds || [])
+      ) {
+        continue;
+      }
+      const key = `${lists.notYetIds.join(',')}|${lists.childWriterIds.join(',')}`;
+      if (streamRefreshRef.current[fam.id] === key) continue;
+      streamRefreshRef.current[fam.id] = key;
+      void (async () => {
+        try {
+          await updateDoc(doc(db, 'families', fam.id), {
+            notYetIds: lists.notYetIds,
+            childWriterIds: lists.childWriterIds,
+            updatedAt: serverTimestamp(),
+          });
+        } catch {
+          return; // a later open tries again
+        }
+        const stream = fam.memberIds.filter((id) => !lists.notYetIds.includes(id));
+        const restamp = async (
+          coll: string,
+          recs: Array<{
+            id: string;
+            userId: string;
+            scope?: string;
+            familyId?: string;
+            memberIds?: string[];
+          }>,
+          kind: string
+        ) => {
+          const target = (kind === 'tasks' ? fam.memberIds : stream).slice(0, 100);
+          for (const rec of recs) {
+            if (rec.scope !== 'family' || rec.familyId !== fam.id) continue;
+            if (rec.userId !== user.uid) continue;
+            if (sameSet(rec.memberIds || [], target)) continue;
+            try {
+              await updateDoc(doc(db, coll, rec.id), {
+                memberIds: target,
+                updatedAt: serverTimestamp(),
+              });
+            } catch {
+              // A refused re-stamp leaves the record as it was.
+            }
+          }
+        };
+        await restamp('tasks', tasks, 'tasks');
+        await restamp('documents', documents, 'documents');
+        await restamp('financeEntries', financeEntries, 'finances');
+        await restamp('propertyEntries', propertyEntries, 'property');
+        await restamp('jasonNotes', jasonNotes, 'notes');
+      })();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [families, user]);
+
+  // Backup everything, every day (Jason, 2026-11-21): while Drive
+  // is connected, the desk writes one whole-desk snapshot a day to
+  // the Steward Backups folder on its own — records, families,
+  // circles, households, notes, briefings, finances above all. The
+  // day stamp lives in this browser; a day with no open desk gets
+  // its snapshot on the next open instead.
+  const autoBackupDataRef = useRef<Parameters<typeof buildWorkspaceJsonBackup>[0] | null>(null);
+  autoBackupDataRef.current = {
+    tasks,
+    documents,
+    propertyEntries,
+    financeEntries,
+    voiceMemories,
+    households,
+    householdMembers,
+    families,
+    circles,
+    jasonNotes,
+    briefings,
+    mailBriefings: ownMailBriefings,
+    circleBriefings: ownCircleBriefings,
+  };
+  const autoBackupBusyRef = useRef(false);
+  useEffect(() => {
+    if (!user || !driveConnected) return;
+    const key = `steward-auto-backup-${user.uid}`;
+    if (localStorage.getItem(key) === localDateKey()) return;
+    const timer = setTimeout(() => {
+      void (async () => {
+        if (autoBackupBusyRef.current) return;
+        if (localStorage.getItem(key) === localDateKey()) return;
+        const token = getDriveAccessToken();
+        const data = autoBackupDataRef.current;
+        if (!token || !data) return;
+        autoBackupBusyRef.current = true;
+        try {
+          const folderId = await ensureStewardBackupFolder(token);
+          await createDriveBackupFile(token, {
+            folderId,
+            name: `steward-auto-backup-${localDateKey()}.json`,
+            mimeType: 'application/json',
+            content: buildWorkspaceJsonBackup(data),
+          });
+          localStorage.setItem(key, localDateKey());
+        } catch {
+          // A failed snapshot tries again on the next open; the
+          // manual backup in Settings remains as it was.
+        } finally {
+          autoBackupBusyRef.current = false;
+        }
+      })();
+    }, 6000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, driveConnected]);
+
+  // The circle add-on (Jason, 2026-11-21): briefings are drawn by
+  // circles of contact. Once per reader per day, the desk writes a
+  // personal add-on from the records this reader's family ring and
+  // circles hold — visible lists only, so the head's omissions and
+  // the finance switch have already done their work before a line
+  // is picked. Saved to circleBriefings, owner-only, and never
+  // folded into the household's shared briefing.
+  const circleBriefingInFlightRef = useRef<string>('');
+  async function handleEnsureCircleBriefing(): Promise<string | null> {
+    if (!user) return null;
+    const dateKey = localDateKey();
+    const existing = ownCircleBriefings.find((b) => b.dateKey === dateKey);
+    if (existing) return existing.text;
+    if (circleBriefingInFlightRef.current === dateKey) return null;
+
+    const where = (rec: { scope?: string; familyId?: string; circleIds?: string[] }) => {
+      if (rec.scope === 'family') {
+        return families.find((f) => f.id === rec.familyId)?.name || 'the family';
+      }
+      if (rec.scope === 'circles') {
+        return (rec.circleIds || [])
+          .map((cid) => circles.find((c) => c.id === cid)?.name || 'a circle')
+          .join(', ');
+      }
+      return '';
+    };
+    const lines: string[] = [];
+    visibleTasks
+      .filter((t) => t.status === 'pending' && (t.scope === 'family' || t.scope === 'circles'))
+      .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+      .slice(0, 15)
+      .forEach((t) =>
+        lines.push(
+          `TASK [${where(t)}]: ${t.title} — due ${t.dueDate}${t.dueTime ? ` at ${t.dueTime}` : ''}${t.place ? ` (${t.place})` : ''}`
+        )
+      );
+    visibleDocuments
+      .filter((d) => d.scope === 'family' || d.scope === 'circles')
+      .slice(0, 8)
+      .forEach((d) => lines.push(`PAPER [${where(d)}]: ${d.title}${d.place ? ` (${d.place})` : ''}`));
+    visibleFinanceEntries
+      .filter((e) => e.scope === 'family' || e.scope === 'circles')
+      .slice(0, 8)
+      .forEach((e) =>
+        lines.push(
+          `MONEY [${where(e)}]: ${e.title} — $${e.amount.toFixed(2)} on ${e.entryDate}${e.place ? ` (${e.place})` : ''}`
+        )
+      );
+    visiblePropertyEntries
+      .filter((e) => e.scope === 'family' || e.scope === 'circles')
+      .slice(0, 6)
+      .forEach((e) => lines.push(`PROPERTY [${where(e)}]: ${e.title} — ${e.scheduledDate}`));
+    if (lines.length === 0) return null;
+
+    circleBriefingInFlightRef.current = dateKey;
+    try {
+      const resp = await fetch('/api/assistant/briefing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'circles',
+          context: {
+            userName: userProfile?.displayName || user.displayName || 'Steward User',
+            addressName: userProfile?.addressName || '',
+            currentDateTime: new Date().toLocaleString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+              hour: 'numeric',
+              minute: '2-digit',
+            }),
+            circleSummary: lines.join('\n'),
+          },
+        }),
+      });
+      if (!resp.ok) return null;
+      const data = (await resp.json()) as { briefing?: string };
+      const text = String(data.briefing || '').trim();
+      if (!text) return null;
+      const stamp = householdStamp();
+      const id = `circlebrief-${user.uid.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40)}-${dateKey}`;
+      await setDoc(doc(db, 'circleBriefings', id), {
+        userId: user.uid,
+        householdId: stamp.householdId,
+        dateKey,
+        text: text.slice(0, 4000),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      return text;
+    } catch (err) {
+      console.error('Circle briefing failed', err);
+      return null;
+    } finally {
+      circleBriefingInFlightRef.current = '';
+    }
+  }
+
   // The answering desk's screen opens behind the front door panel.
   function handleDeskEngaged(desk: FrontDoorDeskId) {
     if (desk === 'records') setActiveTab('vault');
@@ -1958,6 +2536,9 @@ function MainApp() {
         verifiedByName: '',
         verifiedAtIso: '',
         paperLocation: (payload.paperLocation || '').slice(0, 200),
+        recordKind: payload.recordKind || 'personal',
+        customKindLabel:
+          payload.recordKind === 'custom' ? (payload.customKindLabel || '').slice(0, 60) : '',
         driveFileId,
         place: (payload.place || '').slice(0, 60),
         createdAt: serverTimestamp(),
@@ -1984,6 +2565,9 @@ function MainApp() {
       if (updates.notes !== undefined) clean.notes = updates.notes.slice(0, 2000);
       if (updates.verificationStatus !== undefined)
         clean.verificationStatus = updates.verificationStatus;
+      if (updates.recordKind !== undefined) clean.recordKind = updates.recordKind;
+      if (updates.customKindLabel !== undefined)
+        clean.customKindLabel = updates.customKindLabel.slice(0, 60);
       if (updates.verifiedByName !== undefined)
         clean.verifiedByName = updates.verifiedByName.slice(0, 120);
       if (updates.verifiedAtIso !== undefined)
@@ -2419,6 +3003,9 @@ function MainApp() {
         inspectorOrGuest: (payload.inspectorOrGuest || '').slice(0, 120),
         notes: (payload.notes || '').slice(0, 2000),
         linkedDocumentId: (payload.linkedDocumentId || '').slice(0, 128),
+        recordKind: payload.recordKind || 'personal',
+        customKindLabel:
+          payload.recordKind === 'custom' ? (payload.customKindLabel || '').slice(0, 60) : '',
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
@@ -2452,6 +3039,9 @@ function MainApp() {
       if (updates.linkedDocumentId !== undefined)
         clean.linkedDocumentId = updates.linkedDocumentId.slice(0, 128);
       if (updates.place !== undefined) clean.place = updates.place.slice(0, 60);
+      if (updates.recordKind !== undefined) clean.recordKind = updates.recordKind;
+      if (updates.customKindLabel !== undefined)
+        clean.customKindLabel = updates.customKindLabel.slice(0, 60);
 
       await updateDoc(doc(db, 'propertyEntries', entryId), clean);
     } catch (err) {
@@ -3274,6 +3864,24 @@ function MainApp() {
             </div>
           )}
 
+          {todaysCircleBriefing && (
+            <div className="mb-6 bg-white dark:bg-slate-900 border border-sky-300 dark:border-sky-800 rounded-xl p-5 space-y-3">
+              <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                From your wider circles — only you see this
+              </h2>
+              <div className="space-y-2">
+                {todaysCircleBriefing.text.split(/\n\s*\n/).map((para, i) => (
+                  <p
+                    key={i}
+                    className="text-sm leading-relaxed text-slate-700 dark:text-slate-200"
+                  >
+                    {para}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+
           {visibleJasonNotes.length > 0 && (
             <div className="mb-6 bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-800 rounded-xl p-5 space-y-3">
               <div className="flex items-center justify-between gap-3">
@@ -3707,6 +4315,53 @@ function MainApp() {
                       {householdMembers.map((m) => m.displayName).join(', ')}
                     </p>
                   )}
+                  {activeHousehold.ownerId === user.uid && (
+                    <div className="space-y-2 pt-1">
+                      <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                        Head of household
+                      </p>
+                      {householdMembers
+                        .filter((m) => m.userId !== user.uid)
+                        .map((m) => (
+                          <div
+                            key={m.id}
+                            className="flex items-center justify-between gap-2"
+                          >
+                            <span className="text-xs text-slate-600 dark:text-slate-300">
+                              {m.displayName}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => void handleEvictMember(m)}
+                              className="min-h-[30px] px-2.5 text-[11px] font-medium text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-md"
+                            >
+                              Remove from household
+                            </button>
+                          </div>
+                        ))}
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Removing someone ends their access to this household's records.
+                        Anything they deposited stays theirs — a household only holds
+                        records, it never owns them.
+                      </p>
+                      <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400">
+                        <input
+                          type="checkbox"
+                          checked={!!activeHousehold.allowPartnerFinances}
+                          onChange={(e) =>
+                            void handleTogglePartnerFinances(activeHousehold, e.target.checked)
+                          }
+                          className="mt-0.5"
+                        />
+                        <span>
+                          Let this household's money records be seen through circles.
+                          Off is the cautious setting, and it is the default — money
+                          stays inside the household and family rings unless the head
+                          of household turns this on.
+                        </span>
+                      </label>
+                    </div>
+                  )}
                   <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400">
                     <input
                       type="checkbox"
@@ -3860,11 +4515,119 @@ function MainApp() {
                           </div>
                           <div className="px-3 space-y-1.5">
                             <p className="text-xs text-slate-500 dark:text-slate-400">
-                              Head of the family: {familyHeadName(f)} — the eldest living
-                              counted person. The roster counts people, not just accounts:
+                              Head of the family: {familyHeadName(f)} —{' '}
+                              {f.headMode === 'chosen'
+                                ? 'chosen by the family.'
+                                : 'the eldest living counted person, blood first, then age.'}{' '}
+                              The roster counts people, not just accounts:
                               cousins who never open the app are family too, and nobody is
                               taken off it when they die. The family doesn't forget.
                             </p>
+                            {f.ownerId === user.uid && (
+                              <div className="flex flex-wrap items-center gap-2 pt-1">
+                                <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                                  <span>Headship:</span>
+                                  <select
+                                    value={f.headMode === 'chosen' ? 'chosen' : 'seniority'}
+                                    onChange={(e) =>
+                                      void updateDoc(doc(db, 'families', f.id), {
+                                        headMode: e.target.value === 'chosen' ? 'chosen' : 'seniority',
+                                        updatedAt: serverTimestamp(),
+                                      }).catch((err) =>
+                                        handleFirestoreError(err, OperationType.UPDATE, `families/${f.id}`)
+                                      )
+                                    }
+                                    className="min-h-[34px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                                  >
+                                    <option value="seniority">Rank by age and blood</option>
+                                    <option value="chosen">Chosen by the family</option>
+                                  </select>
+                                </label>
+                                {f.headMode === 'chosen' && (
+                                  <>
+                                    <input
+                                      type="text"
+                                      value={headDrafts[`${f.id}:0`] ?? f.headNames?.[0] ?? ''}
+                                      onChange={(e) =>
+                                        setHeadDrafts((prev) => ({ ...prev, [`${f.id}:0`]: e.target.value }))
+                                      }
+                                      placeholder="Head's name"
+                                      className="w-36 min-h-[34px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                                    />
+                                    <input
+                                      type="text"
+                                      value={headDrafts[`${f.id}:1`] ?? f.headNames?.[1] ?? ''}
+                                      onChange={(e) =>
+                                        setHeadDrafts((prev) => ({ ...prev, [`${f.id}:1`]: e.target.value }))
+                                      }
+                                      placeholder="Co-head (optional)"
+                                      className="w-36 min-h-[34px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        void updateDoc(doc(db, 'families', f.id), {
+                                          headNames: [
+                                            (headDrafts[`${f.id}:0`] ?? f.headNames?.[0] ?? '').trim(),
+                                            (headDrafts[`${f.id}:1`] ?? f.headNames?.[1] ?? '').trim(),
+                                          ]
+                                            .filter(Boolean)
+                                            .slice(0, 2),
+                                          updatedAt: serverTimestamp(),
+                                        }).catch((err) =>
+                                          handleFirestoreError(err, OperationType.UPDATE, `families/${f.id}`)
+                                        )
+                                      }
+                                      className="min-h-[34px] px-3 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-md"
+                                    >
+                                      Save heads
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
+                              Becoming responsible: at the age this family sets — 18
+                              unless the family chooses otherwise — a member enters the
+                              family's read/write stream on their own, figured from
+                              their birthdate on the roster. Children see the family
+                              calendar, but not the family's money, papers, or property
+                              records, and they can add to the calendar only when a
+                              parent says so. The head can bring someone in early or
+                              hold someone back. These rules are this family's own,
+                              set at the top and working down; where rules conflict,
+                              the elder head's word stands.
+                            </p>
+                            {f.ownerId === user.uid && (
+                              <div className="flex flex-wrap items-center gap-2">
+                                <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                                  <span>Responsible at age:</span>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={120}
+                                    value={
+                                      responsibleAgeDrafts[f.id] ??
+                                      String(familyResponsibleAge(f))
+                                    }
+                                    onChange={(e) =>
+                                      setResponsibleAgeDrafts((prev) => ({
+                                        ...prev,
+                                        [f.id]: e.target.value,
+                                      }))
+                                    }
+                                    className="w-20 min-h-[34px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleSaveResponsibleAge(f)}
+                                  className="min-h-[34px] px-3 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-md"
+                                >
+                                  Save age
+                                </button>
+                              </div>
+                            )}
                             {(f.people || []).map((person, idx) => (
                               <div
                                 key={idx}
@@ -3872,7 +4635,18 @@ function MainApp() {
                               >
                                 <span>
                                   {person.name}
-                                  {person.birthYear ? ` · born ${person.birthYear}` : ''}
+                                  {person.birthDate
+                                    ? ` · born ${person.birthDate}`
+                                    : person.birthYear
+                                      ? ` · born ${person.birthYear}`
+                                      : ''}
+                                  {person.userId
+                                    ? personIsResponsible(f, person, localDateKey())
+                                      ? ' · in the stream'
+                                      : ' · not yet responsible'
+                                    : ''}
+                                  {person.blood === false ? ' · by marriage or choice' : ''}
+                                  {person.courtesy ? ' · courtesy' : ''}
                                   {person.living === false ? ' · remembered' : ''}
                                   {familyHeadName(f) === person.name && person.living !== false
                                     ? ' · head'
@@ -3900,6 +4674,75 @@ function MainApp() {
                                 )}
                               </div>
                             ))}
+                            {(f.people || []).map((person, idx) =>
+                              f.ownerId === user.uid ? (
+                                <div
+                                  key={`standing-${idx}`}
+                                  className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-1 text-[11px] text-slate-500 dark:text-slate-400"
+                                >
+                                  <span>{person.name}:</span>
+                                  <label className="flex items-center gap-1.5">
+                                    <span>Standing</span>
+                                    <select
+                                      value={person.responsibility || 'auto'}
+                                      onChange={(e) =>
+                                        void handleUpdateFamilyPerson(f, idx, {
+                                          responsibility: e.target.value as
+                                            | 'auto'
+                                            | 'yes'
+                                            | 'no',
+                                        })
+                                      }
+                                      className="min-h-[28px] px-1.5 text-[11px] bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                                    >
+                                      <option value="auto">By age</option>
+                                      <option value="yes">In the stream now</option>
+                                      <option value="no">Held back</option>
+                                    </select>
+                                  </label>
+                                  <label className="flex items-center gap-1.5">
+                                    <span>At age</span>
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      max={120}
+                                      defaultValue={person.responsibleAge ?? ''}
+                                      placeholder={String(familyResponsibleAge(f))}
+                                      onBlur={(e) => {
+                                        const v = e.target.value.trim();
+                                        if (v === '') {
+                                          if (person.responsibleAge !== undefined) {
+                                            void handleUpdateFamilyPerson(f, idx, {}, [
+                                              'responsibleAge',
+                                            ]);
+                                          }
+                                          return;
+                                        }
+                                        const n = Number(v);
+                                        if (Number.isFinite(n) && n >= 1 && n <= 120) {
+                                          void handleUpdateFamilyPerson(f, idx, {
+                                            responsibleAge: Math.floor(n),
+                                          });
+                                        }
+                                      }}
+                                      className="w-16 min-h-[28px] px-1.5 text-[11px] bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                                    />
+                                  </label>
+                                  <label className="flex items-center gap-1.5">
+                                    <input
+                                      type="checkbox"
+                                      checked={!!person.canWriteCalendar}
+                                      onChange={(e) =>
+                                        void handleUpdateFamilyPerson(f, idx, {
+                                          canWriteCalendar: e.target.checked,
+                                        })
+                                      }
+                                    />
+                                    <span>May add to the calendar</span>
+                                  </label>
+                                </div>
+                              ) : null
+                            )}
                             {f.ownerId === user.uid && (
                               <div className="flex gap-2 pt-1">
                                 <input
@@ -3916,6 +4759,19 @@ function MainApp() {
                                   placeholder="Born (year)"
                                   className="w-28 min-h-[38px] px-3 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
                                 />
+                                <select
+                                  value={personKindDraft}
+                                  onChange={(e) =>
+                                    setPersonKindDraft(
+                                      e.target.value as 'blood' | 'marriage' | 'courtesy'
+                                    )
+                                  }
+                                  className="min-h-[38px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                                >
+                                  <option value="blood">Blood</option>
+                                  <option value="marriage">By marriage or choice</option>
+                                  <option value="courtesy">Courtesy</option>
+                                </select>
                                 <button
                                   type="button"
                                   onClick={() => void handleAddFamilyPerson(f)}
@@ -3923,6 +4779,34 @@ function MainApp() {
                                 >
                                   Add
                                 </button>
+                              </div>
+                            )}
+                            {f.ownerId === user.uid && (
+                              <div className="flex flex-wrap gap-2">
+                                <label className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                                  <span>Birthdate, if known</span>
+                                  <input
+                                    type="date"
+                                    value={personDateDraft}
+                                    onChange={(e) => setPersonDateDraft(e.target.value)}
+                                    className="min-h-[38px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                                  />
+                                </label>
+                                <label className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                                  <span>Their account, if they use the app</span>
+                                  <select
+                                    value={personLinkDraft}
+                                    onChange={(e) => setPersonLinkDraft(e.target.value)}
+                                    className="min-h-[38px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                                  >
+                                    <option value="">No account link</option>
+                                    {householdMembers.map((m) => (
+                                      <option key={m.userId} value={m.userId}>
+                                        {m.displayName}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
                               </div>
                             )}
                           </div>
@@ -3965,32 +4849,146 @@ function MainApp() {
                         No circles yet.
                       </p>
                     ) : (
-                      circles.map((c) => (
-                        <div
-                          key={c.id}
-                          className="flex items-center justify-between gap-2 px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
-                        >
-                          <span className="text-xs text-slate-900 dark:text-slate-100">
-                            {c.name}
-                            <span className="text-slate-500 dark:text-slate-400">
-                              {' '}
-                              — {c.memberIds.length} people
-                              {c.temporary
-                                ? ` · temporary${c.expiresAtKey ? `, closes ${c.expiresAtKey}` : ''}`
-                                : ' · permanent'}
-                            </span>
-                          </span>
-                          {c.ownerId === user.uid && (
-                            <button
-                              type="button"
-                              onClick={() => void handleDeleteCircle(c)}
-                              className="min-h-[36px] px-3 text-xs font-medium text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg"
-                            >
-                              End circle
-                            </button>
-                          )}
-                        </div>
-                      ))
+                      circles.map((c) => {
+                        const iGovern =
+                          c.ownerId === user.uid || circleHeadIds(c).includes(user.uid);
+                        return (
+                          <div
+                            key={c.id}
+                            className="px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg space-y-2"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs text-slate-900 dark:text-slate-100">
+                                {c.name}
+                                <span className="text-slate-500 dark:text-slate-400">
+                                  {' '}
+                                  — {c.memberIds.length} people
+                                  {c.temporary
+                                    ? ` · temporary${c.expiresAtKey ? `, closes ${c.expiresAtKey}` : ''}`
+                                    : ' · permanent'}
+                                  {' · head: '}
+                                  {circleHeadIds(c).map(memberDisplayName).join(' & ')}
+                                </span>
+                              </span>
+                              {c.ownerId === user.uid && (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDeleteCircle(c)}
+                                  className="min-h-[36px] px-3 text-xs font-medium text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg"
+                                >
+                                  End circle
+                                </button>
+                              )}
+                            </div>
+                            {iGovern && (
+                              <div className="space-y-2 pt-1 border-t border-slate-200 dark:border-slate-800">
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                  Everyone in the circle sees everything by default —
+                                  default on. The head can leave a person or a kind of
+                                  record out of this circle's views, writes, or
+                                  submissions.
+                                </p>
+                                {c.ownerId === user.uid && (
+                                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                    <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                                      Heads (up to two — a couple can head together):
+                                    </span>
+                                    {c.memberIds.map((mid) => (
+                                      <label
+                                        key={mid}
+                                        className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300"
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={(c.headIds || []).includes(mid)}
+                                          disabled={
+                                            !(c.headIds || []).includes(mid) &&
+                                            (c.headIds || []).length >= 2
+                                          }
+                                          onChange={(e) =>
+                                            handleToggleCircleHead(c, mid, e.target.checked)
+                                          }
+                                        />
+                                        <span>{memberDisplayName(mid)}</span>
+                                      </label>
+                                    ))}
+                                  </div>
+                                )}
+                                {c.memberIds
+                                  .filter((mid) => mid !== user.uid)
+                                  .map((mid) => (
+                                    <div
+                                      key={mid}
+                                      className="flex flex-wrap items-center gap-x-3 gap-y-1"
+                                    >
+                                      <span className="text-[11px] text-slate-600 dark:text-slate-300">
+                                        {memberDisplayName(mid)}:
+                                      </span>
+                                      <label className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300">
+                                        <input
+                                          type="checkbox"
+                                          checked={!(c.omitViewIds || []).includes(mid)}
+                                          onChange={(e) =>
+                                            handleToggleCircleOmit(
+                                              c,
+                                              'omitViewIds',
+                                              mid,
+                                              !e.target.checked
+                                            )
+                                          }
+                                        />
+                                        <span>Sees the records</span>
+                                      </label>
+                                      <label className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300">
+                                        <input
+                                          type="checkbox"
+                                          checked={!(c.omitWriteIds || []).includes(mid)}
+                                          onChange={(e) =>
+                                            handleToggleCircleOmit(
+                                              c,
+                                              'omitWriteIds',
+                                              mid,
+                                              !e.target.checked
+                                            )
+                                          }
+                                        />
+                                        <span>Can add records</span>
+                                      </label>
+                                    </div>
+                                  ))}
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                                    Shown in this circle:
+                                  </span>
+                                  {(
+                                    [
+                                      ['financial', 'Financial'],
+                                      ['medical', 'Medical'],
+                                      ['calendar', 'Calendar events'],
+                                      ['personal', 'Personal'],
+                                      ['custom', 'Custom kinds'],
+                                    ] as Array<[string, string]>
+                                  ).map(([kind, label]) => (
+                                    <label
+                                      key={kind}
+                                      className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={!(c.omitKinds || []).includes(kind)}
+                                        onChange={(e) =>
+                                          handleToggleCircleKind(c, kind, !e.target.checked)
+                                        }
+                                      />
+                                      <span>{label}</span>
+                                    </label>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
                     )}
                     <form onSubmit={handleCreateCircle} className="space-y-2">
                       <input
@@ -4206,6 +5204,14 @@ function MainApp() {
         propertyEntries={propertyEntries}
         financeEntries={financeEntries}
         voiceMemories={voiceMemories}
+        households={households}
+        householdMembers={householdMembers}
+        families={families}
+        circles={circles}
+        jasonNotes={jasonNotes}
+        briefings={briefings}
+        mailBriefings={ownMailBriefings}
+        circleBriefings={ownCircleBriefings}
         onRestoreSnapshot={handleRestoreSnapshot}
         onLinkDocumentPhoto={handleLinkDocumentDrivePhoto}
       />
@@ -4260,6 +5266,8 @@ function MainApp() {
           onRequestBriefing={handleEnsureBriefing}
           mailBriefingText={todaysMailBriefing?.text || null}
           onRequestMailBriefing={handleEnsureMailBriefing}
+          circleBriefingText={todaysCircleBriefing?.text || null}
+          onRequestCircleBriefing={handleEnsureCircleBriefing}
           onSaveMemory={handleSaveVoiceMemory}
           onRecordBehaviorSignal={handleRecordBehaviorSignal}
         />

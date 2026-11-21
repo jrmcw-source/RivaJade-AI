@@ -1,5 +1,5 @@
 import React from 'react';
-import { Family, Household, Circle, familyHeadName } from '../types';
+import { Family, Household, Circle, familyHeadName, circleHeadIds } from '../types';
 
 // The Tree (Jason, 2026-11-20): one page showing the whole setup —
 // the ground and the people. The place tree is the family's ground:
@@ -158,15 +158,30 @@ export const TreeView: React.FC<TreeViewProps> = ({
             No circles drawn yet. Draw one in Settings — any set of people, any shape at all.
           </p>
         ) : (
-          circles.map((c) => (
-            <p key={c.id} className="text-xs text-slate-600 dark:text-slate-400">
-              <span className="font-medium text-slate-800 dark:text-slate-200">{c.name}</span> —{' '}
-              {c.memberIds.length} people ·{' '}
-              {c.temporary
-                ? `temporary${c.expiresAtKey ? `, closes ${c.expiresAtKey}` : ''}`
-                : 'permanent'}
-            </p>
-          ))
+          circles.map((c) => {
+            // Head names resolve through the family rosters, the one
+            // place account ids carry names; an unresolved head is
+            // simply not named here rather than guessed at.
+            const headNames = circleHeadIds(c)
+              .map((uid) => {
+                for (const f of families) {
+                  const person = (f.people || []).find((x) => x.userId === uid);
+                  if (person) return person.name;
+                }
+                return households.find((h) => h.ownerId === uid)?.ownerName || '';
+              })
+              .filter(Boolean);
+            return (
+              <p key={c.id} className="text-xs text-slate-600 dark:text-slate-400">
+                <span className="font-medium text-slate-800 dark:text-slate-200">{c.name}</span> —{' '}
+                {c.memberIds.length} people ·{' '}
+                {c.temporary
+                  ? `temporary${c.expiresAtKey ? `, closes ${c.expiresAtKey}` : ''}`
+                  : 'permanent'}
+                {headNames.length > 0 ? ` · head: ${headNames.join(' & ')}` : ''}
+              </p>
+            );
+          })
         )}
         <p className={small}>
           Only your circles are drawn. A circle you're not in isn't shown to you anywhere — not

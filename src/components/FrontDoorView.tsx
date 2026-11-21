@@ -122,6 +122,8 @@ interface FrontDoorViewProps {
   onRequestBriefing: () => Promise<string | null>;
   mailBriefingText: string | null;
   onRequestMailBriefing: () => Promise<string | null>;
+  circleBriefingText: string | null;
+  onRequestCircleBriefing: () => Promise<string | null>;
   onSaveMemory: (payload: {
     summary: string;
     followUpSteps: string[];
@@ -258,6 +260,8 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
     onRequestBriefing,
     mailBriefingText,
     onRequestMailBriefing,
+    circleBriefingText,
+    onRequestCircleBriefing,
     onSaveMemory,
     onRecordBehaviorSignal,
   } = props;
@@ -1256,6 +1260,9 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
       // reader's own email switch is on — it is theirs alone, and it
       // never becomes part of the household's briefing.
       const mailText = mailBriefingText || (await onRequestMailBriefing());
+      // The circle add-on follows — drawn from the reader's own
+      // family ring and circles, theirs alone, like the mail.
+      const circleText = circleBriefingText || (await onRequestCircleBriefing());
       const push = (text: string) =>
         setMessages((prev) => [
           ...prev,
@@ -1269,8 +1276,9 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
         ]);
       push(sharedText);
       if (mailText) push(mailText);
+      if (circleText) push(circleText);
       setPhase('engaged');
-      speak(mailText ? `${sharedText}\n\n${mailText}` : sharedText);
+      speak([sharedText, mailText, circleText].filter(Boolean).join('\n\n'));
     } finally {
       setBriefingBusy(false);
     }

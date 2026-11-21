@@ -103,17 +103,17 @@ service cloud.firestore {
     // roster), or circles (the union of the tagged circles' members
     // plus the depositor). The depositor (userId) is always in the
     // audience and always the owner; a ring or a circle only holds.
-    function isValidHouseholdStamp(data) {
+    function isValidHouseholdStamp(data, kind) {
       return data.householdId is string
         && data.householdId.size() <= 128
         && isBoundedStringList(data.memberIds, 100, 128)
         && data.memberIds.size() >= 1
         && data.userId in data.memberIds
         && request.auth.uid in data.memberIds
-        && audienceMatches(data);
+        && audienceMatches(data, kind);
     }
 
-    function audienceMatches(data) {
+    function audienceMatches(data, kind) {
       let scope = data.get('scope', 'household');
       return (scope == 'private' && data.memberIds.size() == 1)
         || (scope == 'household'
@@ -122,15 +122,37 @@ service cloud.firestore {
               && isValidId(data.householdId)
               && isHouseholdMember(data.householdId)
               && data.memberIds == householdData(data.householdId).memberIds)))
-        || (scope == 'family'
-          && data.get('familyId', '').size() > 0
-          && isValidId(data.get('familyId', ''))
-          && request.auth.uid in familyData(data.get('familyId', '')).memberIds
-          && data.memberIds == familyData(data.get('familyId', '')).memberIds)
+        || (scope == 'family' && familyAudienceMatches(data, kind))
         || (scope == 'circles'
           && data.get('circleIds', []).size() >= 1
           && data.get('circleIds', []).size() <= 4
           && circleAudienceMatches(data));
+    }
+
+    // Family audiences (Jason, 2026-11-21): each family's rules are
+    // its own, set at the top of that family and working down. The
+    // responsible age decides who is in the family's read/write
+    // stream; the family doc carries the maintained lists
+    // (notYetIds, childWriterIds) figured from its roster. Children
+    // always see the family calendar, so a task's stamp is the full
+    // roster — but a child may only write one when a parent has
+    // granted it (childWriterIds). Everything else — money above
+    // all — is stamped to the stream alone: everyone left out of
+    // the stamp must be on the not-yet list, and a not-yet member
+    // cannot write at all.
+    function familyAudienceMatches(data, kind) {
+      let fam = familyData(data.get('familyId', ''));
+      let notYet = fam.get('notYetIds', []);
+      return data.get('familyId', '').size() > 0
+        && isValidId(data.get('familyId', ''))
+        && request.auth.uid in fam.memberIds
+        && data.memberIds.hasOnly(fam.memberIds)
+        && (kind == 'tasks'
+          ? (fam.memberIds.removeAll(data.memberIds).size() == 0
+            && (!(request.auth.uid in notYet)
+              || request.auth.uid in fam.get('childWriterIds', [])))
+          : (fam.memberIds.removeAll(data.memberIds).hasOnly(notYet)
+            && !(request.auth.uid in notYet)));
     }
 
     // Circle audiences are verified exactly, one unrolled size at a
@@ -147,36 +169,54 @@ service cloud.firestore {
 
     function circleAudience1(data, ids) {
       let audience = [data.userId] + circleData(ids[0]).memberIds;
+      let omitted = circleData(ids[0]).get('omitViewIds', []);
       return request.auth.uid in circleData(ids[0]).memberIds
+        && !(request.auth.uid in circleData(ids[0]).get('omitWriteIds', []))
+        && data.userId in data.memberIds
         && data.memberIds.hasOnly(audience)
-        && audience.hasOnly(data.memberIds);
+        && audience.removeAll(data.memberIds).hasOnly(omitted);
     }
 
     function circleAudience2(data, ids) {
       let audience = [data.userId] + circleData(ids[0]).memberIds + circleData(ids[1]).memberIds;
+      let omitted = circleData(ids[0]).get('omitViewIds', []) + circleData(ids[1]).get('omitViewIds', []);
       return request.auth.uid in circleData(ids[0]).memberIds
         && request.auth.uid in circleData(ids[1]).memberIds
+        && !(request.auth.uid in circleData(ids[0]).get('omitWriteIds', []))
+        && !(request.auth.uid in circleData(ids[1]).get('omitWriteIds', []))
+        && data.userId in data.memberIds
         && data.memberIds.hasOnly(audience)
-        && audience.hasOnly(data.memberIds);
+        && audience.removeAll(data.memberIds).hasOnly(omitted);
     }
 
     function circleAudience3(data, ids) {
       let audience = [data.userId] + circleData(ids[0]).memberIds + circleData(ids[1]).memberIds + circleData(ids[2]).memberIds;
+      let omitted = circleData(ids[0]).get('omitViewIds', []) + circleData(ids[1]).get('omitViewIds', []) + circleData(ids[2]).get('omitViewIds', []);
       return request.auth.uid in circleData(ids[0]).memberIds
         && request.auth.uid in circleData(ids[1]).memberIds
         && request.auth.uid in circleData(ids[2]).memberIds
+        && !(request.auth.uid in circleData(ids[0]).get('omitWriteIds', []))
+        && !(request.auth.uid in circleData(ids[1]).get('omitWriteIds', []))
+        && !(request.auth.uid in circleData(ids[2]).get('omitWriteIds', []))
+        && data.userId in data.memberIds
         && data.memberIds.hasOnly(audience)
-        && audience.hasOnly(data.memberIds);
+        && audience.removeAll(data.memberIds).hasOnly(omitted);
     }
 
     function circleAudience4(data, ids) {
       let audience = [data.userId] + circleData(ids[0]).memberIds + circleData(ids[1]).memberIds + circleData(ids[2]).memberIds + circleData(ids[3]).memberIds;
+      let omitted = circleData(ids[0]).get('omitViewIds', []) + circleData(ids[1]).get('omitViewIds', []) + circleData(ids[2]).get('omitViewIds', []) + circleData(ids[3]).get('omitViewIds', []);
       return request.auth.uid in circleData(ids[0]).memberIds
         && request.auth.uid in circleData(ids[1]).memberIds
         && request.auth.uid in circleData(ids[2]).memberIds
         && request.auth.uid in circleData(ids[3]).memberIds
+        && !(request.auth.uid in circleData(ids[0]).get('omitWriteIds', []))
+        && !(request.auth.uid in circleData(ids[1]).get('omitWriteIds', []))
+        && !(request.auth.uid in circleData(ids[2]).get('omitWriteIds', []))
+        && !(request.auth.uid in circleData(ids[3]).get('omitWriteIds', []))
+        && data.userId in data.memberIds
         && data.memberIds.hasOnly(audience)
-        && audience.hasOnly(data.memberIds);
+        && audience.removeAll(data.memberIds).hasOnly(omitted);
     }
 
     // -------------------------------------------------------------------------
@@ -328,9 +368,10 @@ service cloud.firestore {
           || (data.householdId.size() > 0
             && data.userId in data.memberIds
             && request.auth.uid in data.memberIds))
-        && isValidHouseholdStamp(data)
+        && isValidHouseholdStamp(data, 'tasks')
         && (!('scope' in data) || data.scope in ['private', 'household', 'family', 'circles'])
         && (!('familyId' in data) || (data.familyId is string && data.familyId.size() <= 128))
+        && (!('allowPartnerFinances' in data) || data.allowPartnerFinances is bool)
         && (!('circleIds' in data) || isBoundedStringList(data.circleIds, 4, 128))
         && data.title is string
         && data.title.size() >= 1
@@ -411,6 +452,8 @@ service cloud.firestore {
                     'scope',
           'familyId',
           'circleIds',
+          'recordKind',
+          'customKindLabel',
           'createdAt',
           'updatedAt'
         ])
@@ -420,9 +463,11 @@ service cloud.firestore {
           || (data.householdId.size() > 0
             && data.userId in data.memberIds
             && request.auth.uid in data.memberIds))
-        && isValidHouseholdStamp(data)
+        && isValidHouseholdStamp(data, 'other')
         && (!('scope' in data) || data.scope in ['private', 'household', 'family', 'circles'])
         && (!('familyId' in data) || (data.familyId is string && data.familyId.size() <= 128))
+        && (!('recordKind' in data) || data.recordKind in ['financial', 'medical', 'calendar', 'personal', 'custom'])
+        && (!('customKindLabel' in data) || (data.customKindLabel is string && data.customKindLabel.size() <= 60))
         && (!('circleIds' in data) || isBoundedStringList(data.circleIds, 4, 128))
         && data.title is string
         && data.title.size() >= 1
@@ -521,7 +566,7 @@ service cloud.firestore {
         ])
         && data.userId is string
         && isValidId(data.userId)
-        && isValidHouseholdStamp(data)
+        && isValidHouseholdStamp(data, 'other')
         && (!('scope' in data) || data.scope in ['private', 'household', 'family', 'circles'])
         && (!('familyId' in data) || (data.familyId is string && data.familyId.size() <= 128))
         && (!('circleIds' in data) || isBoundedStringList(data.circleIds, 4, 128))
@@ -558,7 +603,7 @@ service cloud.firestore {
         ])
         && data.userId is string
         && isValidId(data.userId)
-        && isValidHouseholdStamp(data)
+        && isValidHouseholdStamp(data, 'other')
         && (!('scope' in data) || data.scope in ['private', 'household', 'family', 'circles'])
         && (!('familyId' in data) || (data.familyId is string && data.familyId.size() <= 128))
         && (!('circleIds' in data) || isBoundedStringList(data.circleIds, 4, 128))
@@ -572,6 +617,36 @@ service cloud.firestore {
     }
 
     function isValidMailBriefing(data) {
+      return data.keys().hasAll([
+          'userId',
+          'householdId',
+          'dateKey',
+          'text',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId',
+          'householdId',
+          'dateKey',
+          'text',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.userId is string
+        && isValidId(data.userId)
+        && data.householdId is string
+        && data.householdId.size() <= 128
+        && data.dateKey is string
+        && data.dateKey.size() == 10
+        && data.text is string
+        && data.text.size() >= 1
+        && data.text.size() <= 4000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCircleBriefing(data) {
       return data.keys().hasAll([
           'userId',
           'householdId',
@@ -871,6 +946,8 @@ service cloud.firestore {
                     'scope',
           'familyId',
           'circleIds',
+          'recordKind',
+          'customKindLabel',
           'createdAt',
           'updatedAt'
         ])
@@ -880,9 +957,11 @@ service cloud.firestore {
           || (data.householdId.size() > 0
             && data.userId in data.memberIds
             && request.auth.uid in data.memberIds))
-        && isValidHouseholdStamp(data)
+        && isValidHouseholdStamp(data, 'other')
         && (!('scope' in data) || data.scope in ['private', 'household', 'family', 'circles'])
         && (!('familyId' in data) || (data.familyId is string && data.familyId.size() <= 128))
+        && (!('recordKind' in data) || data.recordKind in ['financial', 'medical', 'calendar', 'personal', 'custom'])
+        && (!('customKindLabel' in data) || (data.customKindLabel is string && data.customKindLabel.size() <= 60))
         && (!('circleIds' in data) || isBoundedStringList(data.circleIds, 4, 128))
         && data.area in ['conservancy', 'cabin_maintenance', 'cabin_stay']
         && data.title is string
@@ -952,7 +1031,7 @@ service cloud.firestore {
           || (data.householdId.size() > 0
             && data.userId in data.memberIds
             && request.auth.uid in data.memberIds))
-        && isValidHouseholdStamp(data)
+        && isValidHouseholdStamp(data, 'other')
         && (!('scope' in data) || data.scope in ['private', 'household', 'family', 'circles'])
         && (!('familyId' in data) || (data.familyId is string && data.familyId.size() <= 128))
         && (!('circleIds' in data) || isBoundedStringList(data.circleIds, 4, 128))
@@ -1000,6 +1079,11 @@ service cloud.firestore {
           'ownerName',
           'memberIds',
                     'people',
+          'headMode',
+          'headNames',
+          'responsibleAge',
+          'notYetIds',
+          'childWriterIds',
           'createdAt',
           'updatedAt'
         ])
@@ -1013,6 +1097,12 @@ service cloud.firestore {
         && data.memberIds.size() >= 1
         && data.ownerId in data.memberIds
         && (!('people' in data) || (data.people is list && data.people.size() <= 100))
+        && (!('headMode' in data) || data.headMode in ['seniority', 'chosen'])
+        && (!('headNames' in data) || isBoundedStringList(data.headNames, 2, 120))
+        && (!('responsibleAge' in data)
+          || (data.responsibleAge is number && data.responsibleAge >= 0 && data.responsibleAge <= 120))
+        && (!('notYetIds' in data) || isBoundedStringList(data.notYetIds, 100, 128))
+        && (!('childWriterIds' in data) || isBoundedStringList(data.childWriterIds, 100, 128))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -1032,6 +1122,11 @@ service cloud.firestore {
           'memberIds',
           'temporary',
           'expiresAtKey',
+          'headMode',
+          'headIds',
+          'omitViewIds',
+          'omitWriteIds',
+          'omitKinds',
           'createdAt',
           'updatedAt'
         ])
@@ -1045,6 +1140,11 @@ service cloud.firestore {
         && data.temporary is bool
         && (!('expiresAtKey' in data)
           || (data.expiresAtKey is string && data.expiresAtKey.size() == 10))
+        && (!('headMode' in data) || data.headMode in ['seniority', 'chosen'])
+        && (!('headIds' in data) || isBoundedStringList(data.headIds, 2, 128))
+        && (!('omitViewIds' in data) || isBoundedStringList(data.omitViewIds, 50, 128))
+        && (!('omitWriteIds' in data) || isBoundedStringList(data.omitWriteIds, 50, 128))
+        && (!('omitKinds' in data) || isBoundedStringList(data.omitKinds, 5, 20))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -1069,6 +1169,7 @@ service cloud.firestore {
           'invitedEmails',
           'calendarToken',
                     'familyId',
+          'allowPartnerFinances',
           'createdAt',
           'updatedAt'
         ])
@@ -1416,6 +1517,27 @@ service cloud.firestore {
         && existing().userId == request.auth.uid;
     }
 
+    match /circleBriefings/{circleBriefingId} {
+      allow get: if isSignedIn() && isValidId(circleBriefingId) && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isVerifiedUser()
+        && isValidId(circleBriefingId)
+        && isValidCircleBriefing(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(circleBriefingId)
+        && isValidCircleBriefing(incoming())
+        && existing().userId == request.auth.uid
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['text', 'updatedAt']);
+      allow delete: if isVerifiedUser() && isValidId(circleBriefingId)
+        && existing().userId == request.auth.uid;
+    }
+
     match /projects/{projectId} {
       allow get: if isSignedIn() && isValidId(projectId) && (isProjectMember(projectId) || request.auth.uid in existing().participantIds);
       allow list: if isSignedIn() && request.auth.uid in resource.data.participantIds;
@@ -1568,7 +1690,7 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && existing().ownerId == request.auth.uid
-        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'memberIds', 'people', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'memberIds', 'people', 'headMode', 'headNames', 'responsibleAge', 'notYetIds', 'childWriterIds', 'updatedAt']);
       allow delete: if isVerifiedUser() && isValidId(familyId) && existing().ownerId == request.auth.uid;
     }
 
@@ -1589,8 +1711,11 @@ service cloud.firestore {
         && incoming().ownerId == existing().ownerId
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
-        && existing().ownerId == request.auth.uid
-        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'memberIds', 'temporary', 'expiresAtKey', 'updatedAt']);
+        && ((existing().ownerId == request.auth.uid
+              && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'memberIds', 'temporary', 'expiresAtKey', 'headMode', 'headIds', 'omitViewIds', 'omitWriteIds', 'omitKinds', 'updatedAt']))
+            || (existing().get('headMode', 'seniority') == 'chosen'
+              && request.auth.uid in existing().get('headIds', [])
+              && incoming().diff(existing()).affectedKeys().hasOnly(['omitViewIds', 'omitWriteIds', 'omitKinds', 'updatedAt'])));
       allow delete: if isVerifiedUser() && isValidId(circleId) && existing().ownerId == request.auth.uid;
     }
 
@@ -1619,7 +1744,7 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && (
           (existing().ownerId == request.auth.uid
-            && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'memberIds', 'invitedEmails', 'calendarToken', 'familyId', 'updatedAt']))
+            && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'memberIds', 'invitedEmails', 'calendarToken', 'familyId', 'allowPartnerFinances', 'updatedAt']))
           ||
           (request.auth.token.email.lower() in existing().invitedEmails
             && !(request.auth.uid in existing().memberIds)

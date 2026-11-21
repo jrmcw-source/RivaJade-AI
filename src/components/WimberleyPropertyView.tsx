@@ -26,6 +26,8 @@ import {
   WimberleyWeatherData,
   getLocalTodayIso,
   PLACES,
+  RecordKind,
+  RECORD_KIND_LABELS,
 } from '../types';
 
 interface WimberleyPropertyViewProps {
@@ -110,6 +112,8 @@ export const WimberleyPropertyView: React.FC<WimberleyPropertyViewProps> = ({
   const [scheduledDate, setScheduledDate] = useState(getLocalTodayIso());
   const [endDate, setEndDate] = useState('');
   const [cadence, setCadence] = useState<PropertyCadence>('seasonal');
+  const [recordKind, setRecordKind] = useState<RecordKind>('personal');
+  const [customKindLabel, setCustomKindLabel] = useState('');
   const [inspectorOrGuest, setInspectorOrGuest] = useState('');
   const [notes, setNotes] = useState('');
   const [linkedDocumentId, setLinkedDocumentId] = useState('');
@@ -173,6 +177,8 @@ export const WimberleyPropertyView: React.FC<WimberleyPropertyViewProps> = ({
     setScheduledDate(getLocalTodayIso());
     setEndDate('');
     setCadence(defaultArea === 'cabin_stay' ? 'once' : 'seasonal');
+    setRecordKind('personal');
+    setCustomKindLabel('');
     setInspectorOrGuest('');
     setNotes('');
     setLinkedDocumentId('');
@@ -188,6 +194,8 @@ export const WimberleyPropertyView: React.FC<WimberleyPropertyViewProps> = ({
     setScheduledDate(entry.scheduledDate);
     setEndDate(entry.endDate || '');
     setCadence(entry.cadence);
+    setRecordKind(entry.recordKind || 'personal');
+    setCustomKindLabel(entry.customKindLabel || '');
     setInspectorOrGuest(entry.inspectorOrGuest || '');
     setNotes(entry.notes || '');
     setLinkedDocumentId(entry.linkedDocumentId || '');
@@ -210,6 +218,8 @@ export const WimberleyPropertyView: React.FC<WimberleyPropertyViewProps> = ({
         inspectorOrGuest: inspectorOrGuest.trim().slice(0, 120),
         notes: notes.trim().slice(0, 2000),
         linkedDocumentId: linkedDocumentId || '',
+        recordKind,
+        customKindLabel: recordKind === 'custom' ? customKindLabel.trim().slice(0, 60) : '',
       };
 
       if (editingEntry) {
@@ -1053,6 +1063,33 @@ export const WimberleyPropertyView: React.FC<WimberleyPropertyViewProps> = ({
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                  Kind of record
+                </label>
+                <select
+                  value={recordKind}
+                  onChange={(e) => setRecordKind(e.target.value as RecordKind)}
+                  className="w-full min-h-[42px] px-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                >
+                  {(Object.keys(RECORD_KIND_LABELS) as RecordKind[])
+                    .filter((k) => k !== 'calendar')
+                    .map((k) => (
+                      <option key={k} value={k}>
+                        {RECORD_KIND_LABELS[k]}
+                      </option>
+                    ))}
+                </select>
+                {recordKind === 'custom' && (
+                  <input
+                    type="text"
+                    value={customKindLabel}
+                    onChange={(e) => setCustomKindLabel(e.target.value)}
+                    placeholder="Name your kind — e.g., Official"
+                    className="w-full min-h-[42px] px-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                  />
+                )}
+              </div>
               <div className="space-y-1">
                 <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
                   {area === 'cabin_stay' ? 'Guest / Contact Name' : 'Caretaker / Vendor'}

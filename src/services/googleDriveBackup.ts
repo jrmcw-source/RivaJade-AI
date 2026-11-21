@@ -1,5 +1,13 @@
 import {
+  Circle,
+  CircleBriefing,
+  Family,
   FinanceEntry,
+  Household,
+  HouseholdMember,
+  JasonNote,
+  MailBriefing,
+  MorningBriefing,
   PropertyEntry,
   ScannedDocument,
   ScheduleTask,
@@ -24,6 +32,19 @@ export interface WorkspaceBackupSnapshot {
   propertyEntries: Array<Omit<PropertyEntry, 'createdAt' | 'updatedAt'>>;
   financeEntries: Array<Omit<FinanceEntry, 'createdAt' | 'updatedAt'>>;
   voiceMemories: Array<Omit<VoiceMemory, 'createdAt' | 'updatedAt'>>;
+  // Backup everything (Jason, 2026-11-21): the snapshot also holds
+  // the desk's structure and the rest of its records — households
+  // and their member cards, families with their rosters and rules,
+  // circles, notes, and the briefings. Optional sections, so a
+  // snapshot written before they existed still reads cleanly.
+  households?: Array<Omit<Household, 'createdAt' | 'updatedAt'>>;
+  householdMembers?: Array<HouseholdMember>;
+  families?: Array<Omit<Family, 'createdAt' | 'updatedAt'>>;
+  circles?: Array<Omit<Circle, 'createdAt' | 'updatedAt'>>;
+  jasonNotes?: Array<Omit<JasonNote, 'createdAt' | 'updatedAt'>>;
+  briefings?: Array<Omit<MorningBriefing, 'createdAt' | 'updatedAt'>>;
+  mailBriefings?: Array<Omit<MailBriefing, 'createdAt' | 'updatedAt'>>;
+  circleBriefings?: Array<Omit<CircleBriefing, 'createdAt' | 'updatedAt'>>;
 }
 
 const DRIVE_FOLDER_NAME = 'Steward Backups';
@@ -204,6 +225,14 @@ export function buildWorkspaceJsonBackup(data: {
   propertyEntries: PropertyEntry[];
   financeEntries: FinanceEntry[];
   voiceMemories: VoiceMemory[];
+  households?: Household[];
+  householdMembers?: HouseholdMember[];
+  families?: Family[];
+  circles?: Circle[];
+  jasonNotes?: JasonNote[];
+  briefings?: MorningBriefing[];
+  mailBriefings?: MailBriefing[];
+  circleBriefings?: CircleBriefing[];
 }): string {
   const stripTimestamps = <T extends { createdAt?: unknown; updatedAt?: unknown }>(items: T[]) =>
     items.map(({ createdAt: _c, updatedAt: _u, ...rest }) => rest);
@@ -216,6 +245,14 @@ export function buildWorkspaceJsonBackup(data: {
     propertyEntries: stripTimestamps(data.propertyEntries),
     financeEntries: stripTimestamps(data.financeEntries),
     voiceMemories: stripTimestamps(data.voiceMemories),
+    ...(data.households ? { households: stripTimestamps(data.households) } : {}),
+    ...(data.householdMembers ? { householdMembers: data.householdMembers } : {}),
+    ...(data.families ? { families: stripTimestamps(data.families) } : {}),
+    ...(data.circles ? { circles: stripTimestamps(data.circles) } : {}),
+    ...(data.jasonNotes ? { jasonNotes: stripTimestamps(data.jasonNotes) } : {}),
+    ...(data.briefings ? { briefings: stripTimestamps(data.briefings) } : {}),
+    ...(data.mailBriefings ? { mailBriefings: stripTimestamps(data.mailBriefings) } : {}),
+    ...(data.circleBriefings ? { circleBriefings: stripTimestamps(data.circleBriefings) } : {}),
   };
   return JSON.stringify(snapshot, null, 2);
 }
