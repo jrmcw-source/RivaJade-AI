@@ -111,16 +111,27 @@ import {
   createDriveBackupFile,
   ensureStewardBackupFolder,
   ensureStewardPhotosFolder,
+  downloadDriveBackupContent,
   listDriveBackups,
+  overwriteDriveBackupFile,
   uploadDriveBinaryFile,
   WorkspaceBackupSnapshot,
 } from './services/googleDriveBackup';
 import {
+  commitStagedPassphrase,
   createVault,
+  discardStagedPassphrase,
+  getRecoveryKeyB64,
+  isRecoveryPendingSave,
   isSealedValue,
   isVaultUnlocked,
   lockVault,
+  markRecoveryKeySaved,
+  prepareRecovery,
+  recoverWithKeyFile,
   sealText,
+  sealTextStaged,
+  stageNewPassphrase,
   subscribeVault,
   unlockVault,
   unsealText,
@@ -987,6 +998,14 @@ function MainApp() {
   const [vaultPass, setVaultPass] = useState('');
   const [vaultPassConfirm, setVaultPassConfirm] = useState('');
   const [vaultFeedback, setVaultFeedback] = useState<string | null>(null);
+  const [vaultRecovered, setVaultRecovered] = useState(false);
+  const [recoverySaved, setRecoverySaved] = useState(false);
+  const [recoveryKeyInHand, setRecoveryKeyInHand] = useState(false);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [vaultNewPass, setVaultNewPass] = useState('');
+  const [vaultNewPassConfirm, setVaultNewPassConfirm] = useState('');
+  const [showChangePass, setShowChangePass] = useState(false);
+  const [vaultReplacePass, setVaultReplacePass] = useState('');
   const sealedKindsNow = effectiveSealedKinds(userProfile);
   const sealIfText = async (v: string) => (v && !isSealedValue(v) ? await sealText(v) : v);
   const [unsealedTasks, setUnsealedTasks] = useState<ScheduleTask[]>([]);
@@ -1849,6 +1868,8 @@ function MainApp() {
     mailNeverSenders?: string;
     vaultSalt?: string;
     vaultCheck?: string;
+    vaultRecoveryWrap?: string;
+    vaultRecoveryCheck?: string;
     sealedKinds?: RecordKind[];
   }) {
     if (!user) return;
@@ -1870,7 +1891,7 @@ function MainApp() {
     if (!user || !userProfile) return;
     if (vaultPass.length < 8) {
       setVaultFeedback(
-        'Use at least 8 characters — a few words you will remember. There is no reset if you forget it.'
+        'Use at least 8 characters — a few words you will remember.'
       );
       return;
     }
@@ -1880,10 +1901,19 @@ function MainApp() {
     }
     try {
       const made = await createVault(vaultPass);
-      await handleUpdateDeskPrefs({ vaultSalt: made.salt, vaultCheck: made.check });
+      await handleUpdateDeskPrefs({
+        vaultSalt: made.salt,
+        vaultCheck: made.check,
+        vaultRecoveryWrap: made.recoveryWrap,
+        vaultRecoveryCheck: made.recoveryCheck,
+      });
       setVaultPass('');
       setVaultPassConfirm('');
-      setVaultFeedback('Your vault is made, and it is unlocked on this device.');
+      setRecoveryKeyInHand(true);
+      setRecoverySaved(false);
+      setVaultFeedback(
+        'Your vault is made, and it is unlocked on this device. Save your recovery key below — it opens the vault again if you forget the passphrase.'
+      );
     } catch {
       setVaultFeedback('The vault could not be made just now. Try again.');
     }
@@ -1891,20 +1921,265 @@ function MainApp() {
 
   async function handleUnlockVault() {
     if (!userProfile?.vaultSalt || !userProfile?.vaultCheck) return;
-    const ok = await unlockVault(vaultPass, userProfile.vaultSalt, userProfile.vaultCheck);
+    const pass = vaultPass;
+    const ok = await unlockVault(pass, userProfile.vaultSalt, userProfile.vaultCheck);
     if (ok) {
       setVaultPass('');
+      if (!userProfile.vaultRecoveryWrap) {
+        try {
+          const rec = await prepareRecovery(pass, userProfile.vaultSalt);
+          await handleUpdateDeskPrefs({
+            vaultRecoveryWrap: rec.recoveryWrap,
+            vaultRecoveryCheck: rec.recoveryCheck,
+          });
+          setRecoveryKeyInHand(true);
+          setRecoverySaved(false);
+        } catch {
+          // The vault is open either way; a recovery key can be
+          // prepared again from the sealed-records settings.
+        }
+      }
       setVaultFeedback(
         'Unlocked on this device. Sealed records can be read and filed until you lock the vault or close the app.'
       );
     } else {
-      setVaultFeedback('That passphrase did not open the vault. Try again.');
+      setVaultFeedback(
+        'That passphrase did not open the vault. If you have forgotten it, your Drive recovery key below can open it instead.'
+      );
     }
   }
 
   function handleLockVault() {
     lockVault();
+    setRecoveryKeyInHand(false);
+    setVaultRecovered(false);
+    setShowChangePass(false);
     setVaultFeedback('Locked. Sealed records stay sealed until you unlock the vault again.');
+  }
+
+  // Vault recovery (Jason, 2026-11-21): the recovery key lives as a
+  // small file in the owner's own Drive, in the Steward Backups
+  // folder. Saving writes or replaces that one file; recovering
+  // reads it back and opens the vault with it — the records belong
+  // to their depositor, and the owner's own sign-in is the proof.
+  const RECOVERY_KEY_FILE_NAME = 'Steward-Recovery-Key.json';
+
+  async function handleSaveRecoveryKey() {
+    const keyB64 = getRecoveryKeyB64();
+    if (!keyB64) {
+      setVaultFeedback(
+        'The recovery key is in hand only while the vault is open on this device. Unlock it first.'
+      );
+      return;
+    }
+    const token = getDriveAccessToken();
+    if (!token) {
+      setVaultFeedback('Connect Google Drive first (see Backups), then save the key.');
+      return;
+    }
+    setRecoveryBusy(true);
+    try {
+      const folderId = await ensureStewardBackupFolder(token);
+      const files = await listDriveBackups(token, folderId);
+      const existing = files.find((f) => f.name === RECOVERY_KEY_FILE_NAME);
+      const content = JSON.stringify(
+        {
+          app: 'Steward',
+          kind: 'vault-recovery-key',
+          version: 1,
+          recoveryKey: keyB64,
+          savedAtIso: new Date().toISOString(),
+        },
+        null,
+        2
+      );
+      if (existing) {
+        await overwriteDriveBackupFile(token, existing.id, {
+          name: RECOVERY_KEY_FILE_NAME,
+          mimeType: 'application/json',
+          content,
+        });
+      } else {
+        await createDriveBackupFile(token, {
+          folderId,
+          name: RECOVERY_KEY_FILE_NAME,
+          mimeType: 'application/json',
+          content,
+        });
+      }
+      markRecoveryKeySaved();
+      setRecoverySaved(true);
+      setVaultFeedback('Your recovery key is saved in your Drive, in the Steward Backups folder.');
+    } catch {
+      setVaultFeedback('The recovery key could not be saved just now. Try again.');
+    } finally {
+      setRecoveryBusy(false);
+    }
+  }
+
+  async function handleRecoverVault() {
+    if (!userProfile?.vaultRecoveryWrap || !userProfile?.vaultRecoveryCheck) {
+      setVaultFeedback(
+        'This vault has no recovery key yet. Unlock with your passphrase once, and the desk will make one.'
+      );
+      return;
+    }
+    const token = getDriveAccessToken();
+    if (!token) {
+      setVaultFeedback('Connect Google Drive first (see Backups), then recover the vault.');
+      return;
+    }
+    setRecoveryBusy(true);
+    try {
+      const folderId = await ensureStewardBackupFolder(token);
+      const files = await listDriveBackups(token, folderId);
+      const file = files.find((f) => f.name === RECOVERY_KEY_FILE_NAME);
+      if (!file) {
+        setVaultFeedback(
+          'No recovery key file was found in your Drive. If it was saved, it sits in the Steward Backups folder.'
+        );
+        return;
+      }
+      const text = await downloadDriveBackupContent(token, file.id);
+      let parsed: { recoveryKey?: string } = {};
+      try {
+        parsed = JSON.parse(text) as { recoveryKey?: string };
+      } catch {
+        parsed = {};
+      }
+      if (!parsed.recoveryKey) {
+        setVaultFeedback('That file is not a recovery key.');
+        return;
+      }
+      const ok = await recoverWithKeyFile(parsed.recoveryKey, {
+        vaultRecoveryWrap: userProfile.vaultRecoveryWrap,
+        vaultRecoveryCheck: userProfile.vaultRecoveryCheck,
+        vaultCheck: userProfile.vaultCheck,
+      });
+      if (ok) {
+        setVaultRecovered(true);
+        setRecoverySaved(true);
+        setRecoveryKeyInHand(true);
+        setVaultFeedback(
+          'Your vault is open again — your records are yours. Set a new passphrase below so you can unlock the usual way.'
+        );
+      } else {
+        setVaultFeedback(
+          'That recovery key did not open this vault. It may be an older key, saved before the vault was remade.'
+        );
+      }
+    } catch {
+      setVaultFeedback('The recovery could not be finished just now. Try again.');
+    } finally {
+      setRecoveryBusy(false);
+    }
+  }
+
+  async function handleReplaceRecoveryKey() {
+    if (!userProfile?.vaultSalt || !userProfile?.vaultCheck) return;
+    const ok = await unlockVault(vaultReplacePass, userProfile.vaultSalt, userProfile.vaultCheck);
+    if (!ok) {
+      setVaultFeedback('That passphrase did not open the vault, so no new key was made.');
+      return;
+    }
+    try {
+      const rec = await prepareRecovery(vaultReplacePass, userProfile.vaultSalt);
+      await handleUpdateDeskPrefs({
+        vaultRecoveryWrap: rec.recoveryWrap,
+        vaultRecoveryCheck: rec.recoveryCheck,
+      });
+      setVaultReplacePass('');
+      setRecoveryKeyInHand(true);
+      setRecoverySaved(false);
+      setVaultFeedback(
+        'A new recovery key is made. Save it below — any key file saved before no longer matches this vault.'
+      );
+    } catch {
+      setVaultFeedback('The new recovery key could not be made just now. Try again.');
+    }
+  }
+
+  // Passphrase reset: stage the new key, re-seal every sealed record
+  // the owner holds, and write the records and the new profile
+  // fields in ONE batch — the vault never sits half-moved. Only when
+  // the batch lands does the staged key become the vault key.
+  async function handleResetPassphrase() {
+    if (!user || !isVaultUnlocked()) return;
+    if (vaultNewPass.length < 8) {
+      setVaultFeedback(
+        'Use at least 8 characters for the new passphrase — a few words you will remember.'
+      );
+      return;
+    }
+    if (vaultNewPass !== vaultNewPassConfirm) {
+      setVaultFeedback('The two new passphrases do not match. Type the same one twice.');
+      return;
+    }
+    setRecoveryBusy(true);
+    try {
+      const stage = await stageNewPassphrase(vaultNewPass);
+      const reseal = async (v: string) =>
+        v && isSealedValue(v) ? await sealTextStaged(await unsealText(v)) : v;
+      const batch = writeBatch(db);
+      let count = 0;
+      for (const d of ownDocuments.filter((r) => r.encrypted)) {
+        batch.update(doc(db, 'documents', d.id), {
+          ocrText: await reseal(d.ocrText),
+          summary: await reseal(d.summary),
+          notes: await reseal(d.notes),
+          keyDetails: await Promise.all(d.keyDetails.map(reseal)),
+          updatedAt: serverTimestamp(),
+        });
+        count++;
+      }
+      for (const r of ownPropertyEntries.filter((e) => e.encrypted)) {
+        batch.update(doc(db, 'propertyEntries', r.id), {
+          notes: await reseal(r.notes),
+          updatedAt: serverTimestamp(),
+        });
+        count++;
+      }
+      for (const r of ownFinanceEntries.filter((e) => e.encrypted)) {
+        batch.update(doc(db, 'financeEntries', r.id), {
+          notes: await reseal(r.notes),
+          updatedAt: serverTimestamp(),
+        });
+        count++;
+      }
+      for (const r of ownTasks.filter((e) => e.encrypted)) {
+        batch.update(doc(db, 'tasks', r.id), {
+          notes: await reseal(r.notes),
+          updatedAt: serverTimestamp(),
+        });
+        count++;
+      }
+      batch.update(doc(db, 'users', user.uid), {
+        vaultSalt: stage.salt,
+        vaultCheck: stage.check,
+        vaultRecoveryWrap: stage.recoveryWrap,
+        vaultRecoveryCheck: stage.recoveryCheck,
+        updatedAt: serverTimestamp(),
+      });
+      await batch.commit();
+      commitStagedPassphrase();
+      setVaultRecovered(false);
+      setShowChangePass(false);
+      setVaultNewPass('');
+      setVaultNewPassConfirm('');
+      if (isRecoveryPendingSave()) setRecoverySaved(false);
+      setVaultFeedback(
+        count > 0
+          ? `Your new passphrase is set, and ${count} sealed record${count === 1 ? '' : 's'} re-sealed under it.`
+          : 'Your new passphrase is set.'
+      );
+    } catch {
+      discardStagedPassphrase();
+      setVaultFeedback(
+        'The new passphrase could not be set just now. Nothing was changed — try again.'
+      );
+    } finally {
+      setRecoveryBusy(false);
+    }
   }
 
   // The family and the circles (Jason, 2026-11-20): the widest ring
@@ -4590,10 +4865,12 @@ function MainApp() {
                   the kind, the place, the date — but the words inside can only be read
                   while your vault is unlocked. Official papers are sealed from the
                   start; any other kind can be sealed too. If you forget the
-                  passphrase, sealed records cannot be opened again. There is no back
-                  door. The one exception is the family rule — a family's head,
-                  allowed by a vote of the members, can reset it — and that
-                  recovery is the next piece being built.
+                  passphrase, you are not locked out of your own records: a
+                  recovery key kept as a small file in your own Google Drive
+                  opens your vault again, because the records are yours and
+                  your own sign-in is the proof. Inside a family, the family's
+                  shared sealed records follow the family's own law — the
+                  head's standing control, and the members' vote.
                 </p>
                 {!userProfile?.vaultCheck ? (
                   <div className="space-y-2">
@@ -4633,6 +4910,100 @@ function MainApp() {
                     >
                       <span>Lock the vault</span>
                     </button>
+                    {userProfile?.vaultRecoveryWrap ? (
+                      recoveryKeyInHand ? (
+                        recoverySaved ? (
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            Your recovery key is saved in your Drive, in the Steward
+                            Backups folder. If you forget your passphrase, it opens
+                            your vault again.
+                          </p>
+                        ) : (
+                          <div className="space-y-2 pt-1">
+                            <p className="text-xs text-slate-600 dark:text-slate-400">
+                              Your recovery key is not saved yet. Save it in your
+                              Google Drive — if you ever forget your passphrase, that
+                              key is what opens your vault again.
+                            </p>
+                            <button
+                              type="button"
+                              disabled={recoveryBusy}
+                              onClick={() => void handleSaveRecoveryKey()}
+                              className="min-h-[42px] inline-flex items-center gap-1.5 px-3.5 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-lg"
+                            >
+                              <span>Save my recovery key to my Drive</span>
+                            </button>
+                          </div>
+                        )
+                      ) : (
+                        <div className="space-y-2 pt-1">
+                          <p className="text-xs text-slate-600 dark:text-slate-400">
+                            A recovery key was made for this vault on another day or
+                            device. If you saved it in your Drive, a forgotten
+                            passphrase can be recovered from this page while the vault
+                            is locked. To make a fresh key on this device instead,
+                            type your passphrase once more:
+                          </p>
+                          <input
+                            type="password"
+                            value={vaultReplacePass}
+                            onChange={(e) => setVaultReplacePass(e.target.value)}
+                            placeholder="Your passphrase"
+                            autoComplete="current-password"
+                            className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => void handleReplaceRecoveryKey()}
+                            className="min-h-[42px] inline-flex items-center gap-1.5 px-3.5 text-xs font-medium text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-lg"
+                          >
+                            <span>Make a new recovery key</span>
+                          </button>
+                        </div>
+                      )
+                    ) : null}
+                    <div className="pt-1">
+                      {showChangePass || vaultRecovered ? (
+                        <div className="space-y-2">
+                          <input
+                            type="password"
+                            value={vaultNewPass}
+                            onChange={(e) => setVaultNewPass(e.target.value)}
+                            placeholder="New passphrase"
+                            autoComplete="new-password"
+                            className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                          />
+                          <input
+                            type="password"
+                            value={vaultNewPassConfirm}
+                            onChange={(e) => setVaultNewPassConfirm(e.target.value)}
+                            placeholder="Type it again"
+                            autoComplete="new-password"
+                            className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                          />
+                          <button
+                            type="button"
+                            disabled={recoveryBusy}
+                            onClick={() => void handleResetPassphrase()}
+                            className="min-h-[42px] inline-flex items-center gap-1.5 px-3.5 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-lg"
+                          >
+                            <span>Set the new passphrase</span>
+                          </button>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            Your sealed records are re-sealed under the new
+                            passphrase. Nothing else changes.
+                          </p>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setShowChangePass(true)}
+                          className="min-h-[42px] inline-flex items-center gap-1.5 px-3.5 text-xs font-medium text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-lg"
+                        >
+                          <span>Change my passphrase</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -4651,6 +5022,19 @@ function MainApp() {
                     >
                       <span>Unlock the vault</span>
                     </button>
+                    <div className="space-y-2 pt-1">
+                      <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                        Forgot your passphrase?
+                      </p>
+                      <button
+                        type="button"
+                        disabled={recoveryBusy}
+                        onClick={() => void handleRecoverVault()}
+                        className="min-h-[42px] inline-flex items-center gap-1.5 px-3.5 text-xs font-medium text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-lg"
+                      >
+                        <span>Open my vault with my Drive key</span>
+                      </button>
+                    </div>
                   </div>
                 )}
                 <div className="space-y-1.5 pt-1">

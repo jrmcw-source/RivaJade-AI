@@ -288,6 +288,12 @@ export interface UserProfile {
   // kinds filed sealed; absent, Official alone (effectiveSealedKinds).
   vaultSalt?: string;
   vaultCheck?: string;
+  // Recovery (Jason, 2026-11-21): the vault key wrapped under a
+  // random recovery key, plus a check value sealed under that key.
+  // The recovery key itself lives only in a file in the owner's own
+  // Drive; a forgotten passphrase does not lock the depositor out.
+  vaultRecoveryWrap?: string;
+  vaultRecoveryCheck?: string;
   sealedKinds?: RecordKind[];
   createdAt?: unknown;
   updatedAt?: unknown;

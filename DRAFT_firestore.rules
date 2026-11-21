@@ -256,6 +256,8 @@ service cloud.firestore {
           'mailNeverSenders',
           'vaultSalt',
           'vaultCheck',
+          'vaultRecoveryWrap',
+          'vaultRecoveryCheck',
           'sealedKinds',
           'createdAt',
           'updatedAt'
@@ -290,6 +292,8 @@ service cloud.firestore {
         && data.updatedAt is timestamp
         && (!('vaultSalt' in data) || (data.vaultSalt is string && data.vaultSalt.size() <= 64))
         && (!('vaultCheck' in data) || (data.vaultCheck is string && data.vaultCheck.size() <= 400))
+        && (!('vaultRecoveryWrap' in data) || (data.vaultRecoveryWrap is string && data.vaultRecoveryWrap.size() <= 400))
+        && (!('vaultRecoveryCheck' in data) || (data.vaultRecoveryCheck is string && data.vaultRecoveryCheck.size() <= 400))
         && (!('sealedKinds' in data) || isBoundedStringList(data.sealedKinds, 6, 20));
     }
 
