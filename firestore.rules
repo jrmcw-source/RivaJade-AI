@@ -360,6 +360,8 @@ service cloud.firestore {
           'userId',
           'householdId',
           'memberIds',
+          'ownerIds',
+          'giftLog',
           'title',
           'type',
           'category',
@@ -424,6 +426,8 @@ service cloud.firestore {
         && data.linkedDocumentId.size() <= 128
         && data.completedAtIso is string
         && data.completedAtIso.size() <= 40
+        && (!('ownerIds' in data) || isBoundedStringList(data.ownerIds, 20, 128))
+        && (!('giftLog' in data) || (data.giftLog is list && data.giftLog.size() <= 20))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp
         && (!('encrypted' in data) || data.encrypted is bool);
@@ -455,6 +459,8 @@ service cloud.firestore {
           'userId',
           'householdId',
           'memberIds',
+          'ownerIds',
+          'giftLog',
           'title',
           'category',
           'ocrText',
@@ -523,6 +529,8 @@ service cloud.firestore {
         && data.get('place', '') is string
         && data.get('place', '').size() <= 60
         && data.get('driveFileId', '').size() <= 128
+        && (!('ownerIds' in data) || isBoundedStringList(data.ownerIds, 20, 128))
+        && (!('giftLog' in data) || (data.giftLog is list && data.giftLog.size() <= 20))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp
         && (!('encrypted' in data) || data.encrypted is bool)
@@ -581,6 +589,8 @@ service cloud.firestore {
           'userId',
           'householdId',
           'memberIds',
+          'ownerIds',
+          'giftLog',
           'text',
           'source',
           'handled',
@@ -601,6 +611,8 @@ service cloud.firestore {
         && data.text.size() <= 2000
         && data.source in ['front_door', 'assistant', 'voice']
         && data.handled is bool
+        && (!('ownerIds' in data) || isBoundedStringList(data.ownerIds, 20, 128))
+        && (!('giftLog' in data) || (data.giftLog is list && data.giftLog.size() <= 20))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -959,6 +971,8 @@ service cloud.firestore {
           'userId',
           'householdId',
           'memberIds',
+          'ownerIds',
+          'giftLog',
           'area',
           'title',
           'status',
@@ -1009,6 +1023,8 @@ service cloud.firestore {
         && data.get('place', '') is string
         && data.get('place', '').size() <= 60
         && data.linkedDocumentId.size() <= 128
+        && (!('ownerIds' in data) || isBoundedStringList(data.ownerIds, 20, 128))
+        && (!('giftLog' in data) || (data.giftLog is list && data.giftLog.size() <= 20))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp
         && (!('encrypted' in data) || data.encrypted is bool);
@@ -1035,6 +1051,8 @@ service cloud.firestore {
           'userId',
           'householdId',
           'memberIds',
+          'ownerIds',
+          'giftLog',
           'kind',
           'group',
           'title',
@@ -1089,6 +1107,8 @@ service cloud.firestore {
         && data.get('place', '').size() <= 60
         && data.get('careForJason', false) is bool
         && data.linkedDocumentId.size() <= 128
+        && (!('ownerIds' in data) || isBoundedStringList(data.ownerIds, 20, 128))
+        && (!('giftLog' in data) || (data.giftLog is list && data.giftLog.size() <= 20))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp
         && (!('encrypted' in data) || data.encrypted is bool)
@@ -1198,6 +1218,8 @@ service cloud.firestore {
           'userId',
           'householdId',
           'memberIds',
+          'ownerIds',
+          'giftLog',
           'scope',
           'familyId',
           'circleIds',
@@ -1219,6 +1241,8 @@ service cloud.firestore {
         && data.username is string && data.username.size() <= 200
         && data.url is string && data.url.size() <= 500
         && (!('credentialId' in data) || (data.credentialId is string && data.credentialId.size() <= 128))
+        && (!('ownerIds' in data) || isBoundedStringList(data.ownerIds, 20, 128))
+        && (!('giftLog' in data) || (data.giftLog is list && data.giftLog.size() <= 20))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -1253,6 +1277,58 @@ service cloud.firestore {
         && (!('passwordFamilyWrap' in data) || (data.passwordFamilyWrap is string && data.passwordFamilyWrap.size() <= 4000))
         && (!('notesSealed' in data) || (data.notesSealed is string && data.notesSealed.size() <= 4000))
         && (!('aiUse' in data) || data.aiUse is bool)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidGiveProposal(data) {
+      return data.keys().hasAll([
+          'collectionName',
+          'recordId',
+          'recordTitle',
+          'ownerIds',
+          'proposedBy',
+          'proposedByName',
+          'toUid',
+          'toFamilyId',
+          'toLabel',
+          'approvals',
+          'declines',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'collectionName',
+          'recordId',
+          'recordTitle',
+          'ownerIds',
+          'proposedBy',
+          'proposedByName',
+          'toUid',
+          'toFamilyId',
+          'toLabel',
+          'approvals',
+          'declines',
+          'status',
+          'decision',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.collectionName in ['documents', 'tasks', 'propertyEntries', 'financeEntries', 'jasonNotes', 'accountRecords']
+        && data.recordId is string && data.recordId.size() <= 128
+        && data.recordTitle is string && data.recordTitle.size() <= 200
+        && isBoundedStringList(data.ownerIds, 20, 128)
+        && data.ownerIds.size() >= 1
+        && isValidId(data.proposedBy)
+        && data.proposedByName is string && data.proposedByName.size() <= 120
+        && data.toUid is string && data.toUid.size() <= 128
+        && data.toFamilyId is string && data.toFamilyId.size() <= 128
+        && data.toLabel is string && data.toLabel.size() >= 1 && data.toLabel.size() <= 120
+        && isBoundedStringList(data.approvals, 20, 128)
+        && isBoundedStringList(data.declines, 20, 128)
+        && data.status in ['open', 'approved', 'declined', 'done']
+        && (!('decision' in data) || data.decision in ['majority', 'eldest'])
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -1515,6 +1591,16 @@ service cloud.firestore {
             && incoming().memberIds == householdData(existingHouseholdId()).memberIds
             && incoming().diff(existing()).affectedKeys().hasOnly(['memberIds', 'updatedAt']))
         );
+      allow update: if isVerifiedUser()
+        && isValidId(taskId)
+        && isValidScheduleTask(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().householdId == existing().householdId
+        && incoming().updatedAt == request.time
+        && (existing().userId == request.auth.uid
+          || (('ownerIds' in existing()) && request.auth.uid in existing().ownerIds))
+        && incoming().userId in incoming().memberIds
+        && incoming().diff(existing()).affectedKeys().hasOnly(['userId', 'ownerIds', 'memberIds', 'giftLog', 'updatedAt']);
       allow delete: if isVerifiedUser() && isValidId(taskId)
         && (existing().userId == request.auth.uid
           || (existingHouseholdId().size() > 0
@@ -1562,6 +1648,16 @@ service cloud.firestore {
           && isHouseholdMember(existingHouseholdId())
           && incoming().memberIds == householdData(existingHouseholdId()).memberIds
           && incoming().diff(existing()).affectedKeys().hasOnly(['memberIds', 'updatedAt'])));
+      allow update: if isVerifiedUser()
+        && isValidId(documentId)
+        && isValidScannedDocument(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().householdId == existing().householdId
+        && incoming().updatedAt == request.time
+        && (existing().userId == request.auth.uid
+          || (('ownerIds' in existing()) && request.auth.uid in existing().ownerIds))
+        && incoming().userId in incoming().memberIds
+        && incoming().diff(existing()).affectedKeys().hasOnly(['userId', 'ownerIds', 'memberIds', 'giftLog', 'updatedAt']);
       allow delete: if isVerifiedUser() && isValidId(documentId)
         && (existing().userId == request.auth.uid
           || (existingHouseholdId().size() > 0
@@ -1598,6 +1694,16 @@ service cloud.firestore {
           'circleIds',
           'updatedAt'
         ]);
+      allow update: if isVerifiedUser()
+        && isValidId(recordId)
+        && isValidAccountRecord(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().householdId == existing().householdId
+        && incoming().updatedAt == request.time
+        && (existing().userId == request.auth.uid
+          || (('ownerIds' in existing()) && request.auth.uid in existing().ownerIds))
+        && incoming().userId in incoming().memberIds
+        && incoming().diff(existing()).affectedKeys().hasOnly(['userId', 'ownerIds', 'memberIds', 'giftLog', 'updatedAt']);
       allow delete: if isVerifiedUser() && isValidId(recordId)
         && (existing().userId == request.auth.uid
           || (existingHouseholdId().size() > 0
@@ -1637,8 +1743,51 @@ service cloud.firestore {
           'familyId',
           'updatedAt'
         ]);
+      allow update: if isVerifiedUser()
+        && isValidId(credentialId)
+        && isValidCredential(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().accountRecordId == existing().accountRecordId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().ownerId in incoming().memberIds
+        && incoming().diff(existing()).affectedKeys().hasOnly(['ownerId', 'memberIds', 'updatedAt']);
       allow delete: if isVerifiedUser() && isValidId(credentialId)
         && existing().ownerId == request.auth.uid;
+    }
+
+    match /giveProposals/{proposalId} {
+      // A co-owned record's give, decided in the open: every owner
+      // and the recipient can read the vote.
+      allow get: if isSignedIn() && isValidId(proposalId)
+        && (request.auth.uid in existing().ownerIds
+          || existing().toUid == request.auth.uid
+          || existing().proposedBy == request.auth.uid);
+      allow list: if isSignedIn()
+        && (request.auth.uid in resource.data.get('ownerIds', [])
+          || resource.data.toUid == request.auth.uid
+          || resource.data.proposedBy == request.auth.uid);
+      allow create: if isVerifiedUser()
+        && isValidId(proposalId)
+        && isValidGiveProposal(incoming())
+        && incoming().proposedBy == request.auth.uid
+        && request.auth.uid in incoming().ownerIds
+        && incoming().status == 'open'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(proposalId)
+        && isValidGiveProposal(incoming())
+        && incoming().proposedBy == existing().proposedBy
+        && incoming().recordId == existing().recordId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && request.auth.uid in existing().ownerIds
+        && incoming().approvals.hasAll(existing().approvals)
+        && incoming().declines.hasAll(existing().declines)
+        && incoming().diff(existing()).affectedKeys().hasOnly(['approvals', 'declines', 'status', 'decision', 'updatedAt']);
+      allow delete: if isVerifiedUser() && isValidId(proposalId)
+        && existing().proposedBy == request.auth.uid;
     }
 
     match /voiceMemories/{memoryId} {
@@ -1685,6 +1834,16 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly(['handled', 'updatedAt']);
+      allow update: if isVerifiedUser()
+        && isValidId(noteId)
+        && isValidJasonNote(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().householdId == existing().householdId
+        && incoming().updatedAt == request.time
+        && (existing().userId == request.auth.uid
+          || (('ownerIds' in existing()) && request.auth.uid in existing().ownerIds))
+        && incoming().userId in incoming().memberIds
+        && incoming().diff(existing()).affectedKeys().hasOnly(['userId', 'ownerIds', 'memberIds', 'giftLog', 'updatedAt']);
       allow delete: if isVerifiedUser() && isValidId(noteId)
         && (existing().userId == request.auth.uid
           || isHouseholdMember(existingHouseholdId())
@@ -2180,6 +2339,16 @@ service cloud.firestore {
           && isHouseholdMember(existingHouseholdId())
           && incoming().memberIds == householdData(existingHouseholdId()).memberIds
           && incoming().diff(existing()).affectedKeys().hasOnly(['memberIds', 'updatedAt'])));
+      allow update: if isVerifiedUser()
+        && isValidId(entryId)
+        && isValidPropertyEntry(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().householdId == existing().householdId
+        && incoming().updatedAt == request.time
+        && (existing().userId == request.auth.uid
+          || (('ownerIds' in existing()) && request.auth.uid in existing().ownerIds))
+        && incoming().userId in incoming().memberIds
+        && incoming().diff(existing()).affectedKeys().hasOnly(['userId', 'ownerIds', 'memberIds', 'giftLog', 'updatedAt']);
       allow delete: if isVerifiedUser() && isValidId(entryId)
         && (existing().userId == request.auth.uid
           || (existingHouseholdId().size() > 0
@@ -2225,6 +2394,16 @@ service cloud.firestore {
           && isHouseholdMember(existingHouseholdId())
           && incoming().memberIds == householdData(existingHouseholdId()).memberIds
           && incoming().diff(existing()).affectedKeys().hasOnly(['memberIds', 'updatedAt'])));
+      allow update: if isVerifiedUser()
+        && isValidId(entryId)
+        && isValidFinanceEntry(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().householdId == existing().householdId
+        && incoming().updatedAt == request.time
+        && (existing().userId == request.auth.uid
+          || (('ownerIds' in existing()) && request.auth.uid in existing().ownerIds))
+        && incoming().userId in incoming().memberIds
+        && incoming().diff(existing()).affectedKeys().hasOnly(['userId', 'ownerIds', 'memberIds', 'giftLog', 'updatedAt']);
       allow delete: if isVerifiedUser() && isValidId(entryId)
         && (existing().userId == request.auth.uid
           || (existingHouseholdId().size() > 0

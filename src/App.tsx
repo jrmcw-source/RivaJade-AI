@@ -85,6 +85,8 @@ import {
   ResetRequest,
   AccountRecord,
   Credential,
+  GiveProposal,
+  GiftEntry,
   ProjectInvite,
   ProjectMember,
   ProjectTask,
@@ -352,6 +354,10 @@ function MainApp() {
   const [ownCredentials, setOwnCredentials] = useState<Credential[]>([]);
   const [sharedCredentials, setSharedCredentials] = useState<Credential[]>([]);
   const [boxFeedback, setBoxFeedback] = useState('');
+  const [giveProposalsOwn, setGiveProposalsOwn] = useState<GiveProposal[]>([]);
+  const [giveProposalsForMe, setGiveProposalsForMe] = useState<GiveProposal[]>([]);
+  const [giveTarget, setGiveTarget] = useState('');
+  const [giveFeedback, setGiveFeedback] = useState('');
   const [sharedAccountRecords, setSharedAccountRecords] = useState<AccountRecord[]>([]);
   const [acctTitle, setAcctTitle] = useState('');
   const [acctUsername, setAcctUsername] = useState('');
@@ -614,6 +620,26 @@ function MainApp() {
         );
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'credentials')
+    );
+
+    const unsubGiveOwn = onSnapshot(
+      query(collection(db, 'giveProposals'), where('ownerIds', 'array-contains', user.uid)),
+      (snap) => {
+        setGiveProposalsOwn(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<GiveProposal, 'id'>) }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'giveProposals')
+    );
+
+    const unsubGiveForMe = onSnapshot(
+      query(collection(db, 'giveProposals'), where('toUid', '==', user.uid)),
+      (snap) => {
+        setGiveProposalsForMe(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<GiveProposal, 'id'>) }))
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'giveProposals')
     );
 
     const unsubMemories = onSnapshot(
@@ -889,6 +915,8 @@ function MainApp() {
       unsubAccountsShared();
       unsubCredentials();
       unsubCredentialsShared();
+      unsubGiveOwn();
+      unsubGiveForMe();
       unsubMemories();
       unsubJasonNotes();
       unsubJasonNotesShared();
@@ -1082,6 +1110,11 @@ function MainApp() {
     () => mergeRecordsById(ownCredentials, sharedCredentials),
     [ownCredentials, sharedCredentials]
   );
+  const giveProposals = useMemo(
+    () => mergeRecordsById(giveProposalsOwn, giveProposalsForMe),
+    [giveProposalsOwn, giveProposalsForMe]
+  );
+
   const propertyEntries = useMemo(
     () => mergeRecordsById(ownPropertyEntries, sharedPropertyEntries),
     [ownPropertyEntries, sharedPropertyEntries]
@@ -1094,6 +1127,54 @@ function MainApp() {
     () => mergeRecordsById(ownJasonNotes, sharedJasonNotes),
     [ownJasonNotes, sharedJasonNotes]
   );
+  const giveRows = useMemo(() => {
+    if (!user) return [];
+    const rows: Array<{
+      collectionName: GiveProposal['collectionName'];
+      rec: GiveRecordShape;
+      title: string;
+      kind: string;
+    }> = [
+      ...documents.map((d) => ({
+        collectionName: 'documents' as const,
+        rec: d as unknown as GiveRecordShape,
+        title: d.title,
+        kind: 'Paper',
+      })),
+      ...tasks.map((t) => ({
+        collectionName: 'tasks' as const,
+        rec: t as unknown as GiveRecordShape,
+        title: t.title,
+        kind: 'Task',
+      })),
+      ...propertyEntries.map((e) => ({
+        collectionName: 'propertyEntries' as const,
+        rec: e as unknown as GiveRecordShape,
+        title: e.title,
+        kind: 'Property record',
+      })),
+      ...financeEntries.map((e) => ({
+        collectionName: 'financeEntries' as const,
+        rec: e as unknown as GiveRecordShape,
+        title: e.title,
+        kind: 'Money record',
+      })),
+      ...jasonNotes.map((n) => ({
+        collectionName: 'jasonNotes' as const,
+        rec: n as unknown as GiveRecordShape,
+        title: n.text.slice(0, 60),
+        kind: 'Note',
+      })),
+      ...accountRecords.map((a) => ({
+        collectionName: 'accountRecords' as const,
+        rec: a as unknown as GiveRecordShape,
+        title: a.title,
+        kind: 'Account',
+      })),
+    ];
+    return rows.filter((row) => ownersOf(row.rec).includes(user.uid));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, documents, tasks, propertyEntries, financeEntries, jasonNotes, accountRecords]);
   const briefings = useMemo(
     () => mergeRecordsById(ownBriefings, sharedBriefings),
     [ownBriefings, sharedBriefings]
@@ -2407,6 +2488,225 @@ function MainApp() {
       }
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `credentials/${cred.id}`);
+    }
+  }
+
+
+  // ---- The Give (Jason, 2026-11-21) ----
+  // Ownership never moves by deposit — only by a gift. A sole
+  // owner gives outright. Co-owners decide by majority; a tie at
+  // full turnout goes to the eldest of the owners. Period.
+
+  type GiveRecordShape = {
+    id: string;
+    userId: string;
+    memberIds: string[];
+    ownerIds?: string[];
+    giftLog?: GiftEntry[];
+    credentialId?: string;
+  };
+
+  function ownersOf(rec: GiveRecordShape): string[] {
+    return rec.ownerIds && rec.ownerIds.length > 0 ? rec.ownerIds : [rec.userId];
+  }
+
+  function eldestOwnerUid(ownerIds: string[]): string {
+    let best: { uid: string; birthYear: number } | null = null;
+    for (const fam of families) {
+      for (const person of fam.people || []) {
+        if (person.userId && ownerIds.includes(person.userId) && person.birthYear) {
+          if (!best || person.birthYear < best.birthYear) {
+            best = { uid: person.userId, birthYear: person.birthYear };
+          }
+        }
+      }
+    }
+    if (best) return best.uid;
+    for (const fam of families) {
+      const head = familyHeadUid(fam);
+      if (head && ownerIds.includes(head)) return head;
+    }
+    return ownerIds[0];
+  }
+
+  function findGiveRecord(
+    collectionName: GiveProposal['collectionName'],
+    recordId: string
+  ): GiveRecordShape | null {
+    const lists: Record<string, GiveRecordShape[]> = {
+      documents: documents as unknown as GiveRecordShape[],
+      tasks: tasks as unknown as GiveRecordShape[],
+      propertyEntries: propertyEntries as unknown as GiveRecordShape[],
+      financeEntries: financeEntries as unknown as GiveRecordShape[],
+      jasonNotes: jasonNotes as unknown as GiveRecordShape[],
+      accountRecords: accountRecords as unknown as GiveRecordShape[],
+    };
+    return lists[collectionName]?.find((r) => r.id === recordId) || null;
+  }
+
+  async function executeGive(
+    collectionName: GiveProposal['collectionName'],
+    rec: GiveRecordShape,
+    toUid: string,
+    toFamilyId: string,
+    toLabel: string,
+    decision: 'owner' | 'majority' | 'eldest'
+  ): Promise<boolean> {
+    if (!user) return false;
+    let newOwners: string[];
+    let newPrimary: string;
+    if (toFamilyId) {
+      const fam = families.find((f) => f.id === toFamilyId);
+      if (!fam) return false;
+      newOwners = fam.memberIds.slice(0, 20);
+      newPrimary = familyHeadUid(fam) || newOwners[0];
+    } else {
+      if (!toUid) return false;
+      newOwners = [toUid];
+      newPrimary = toUid;
+    }
+    const memberIds = Array.from(new Set([...(rec.memberIds || []), ...newOwners])).slice(0, 100);
+    const entry: GiftEntry = {
+      fromUid: user.uid,
+      fromName: userProfile?.displayName || user.displayName || 'The owner',
+      toLabel,
+      atIso: new Date().toISOString(),
+      decision,
+    };
+    const giftLog = [...(rec.giftLog || []), entry].slice(-20);
+    await updateDoc(doc(db, collectionName, rec.id), {
+      userId: newPrimary,
+      ownerIds: newOwners,
+      memberIds,
+      giftLog,
+      updatedAt: serverTimestamp(),
+    });
+    if (collectionName === 'accountRecords' && rec.credentialId) {
+      const cred = credentials.find((c) => c.id === rec.credentialId);
+      if (cred && cred.ownerId === user.uid) {
+        await updateDoc(doc(db, 'credentials', cred.id), {
+          ownerId: newPrimary,
+          memberIds,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    }
+    return true;
+  }
+
+  async function handleGive(
+    collectionName: GiveProposal['collectionName'],
+    rec: GiveRecordShape,
+    recordTitle: string
+  ) {
+    if (!user) return;
+    if (!giveTarget) {
+      setGiveFeedback('Pick who receives it first — a person, or a family.');
+      return;
+    }
+    const [kind, targetId] = giveTarget.split(':');
+    const toFamilyId = kind === 'family' ? targetId : '';
+    const toUid = kind === 'person' ? targetId : '';
+    const toLabel =
+      kind === 'family'
+        ? families.find((f) => f.id === targetId)?.name || 'The family'
+        : givePeopleName(targetId);
+    try {
+      const owners = ownersOf(rec);
+      if (owners.length <= 1) {
+        const ok = await executeGive(collectionName, rec, toUid, toFamilyId, toLabel, 'owner');
+        setGiveFeedback(
+          ok ? `Given. ${recordTitle} now belongs to ${toLabel}.` : 'That give could not be made.'
+        );
+        return;
+      }
+      const id = createSafeId('give');
+      await setDoc(doc(db, 'giveProposals', id), {
+        collectionName,
+        recordId: rec.id,
+        recordTitle,
+        ownerIds: owners,
+        proposedBy: user.uid,
+        proposedByName: userProfile?.displayName || user.displayName || 'An owner',
+        toUid,
+        toFamilyId,
+        toLabel,
+        approvals: [user.uid],
+        declines: [],
+        status: 'open',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setGiveFeedback(
+        `Proposed. ${recordTitle} has ${owners.length} owners — the others vote below, a majority carries it, and a tie goes to the eldest.`
+      );
+    } catch (err) {
+      setGiveFeedback(err instanceof Error ? err.message : 'The give could not be started.');
+    }
+  }
+
+  function givePeopleName(uid: string): string {
+    const member = householdMembers.find((m) => m.userId === uid);
+    if (member) return member.displayName;
+    for (const fam of families) {
+      const person = (fam.people || []).find((pp) => pp.userId === uid);
+      if (person) return person.name;
+    }
+    return 'A family member';
+  }
+
+  async function handleVoteGive(p: GiveProposal, approve: boolean) {
+    if (!user) return;
+    const approvals = approve
+      ? Array.from(new Set([...(p.approvals || []), user.uid]))
+      : (p.approvals || []).filter((a) => a !== user.uid);
+    const declines = approve
+      ? (p.declines || []).filter((d) => d !== user.uid)
+      : Array.from(new Set([...(p.declines || []), user.uid]));
+    const total = p.ownerIds.length;
+    const updates: Record<string, unknown> = { approvals, declines, updatedAt: serverTimestamp() };
+    if (approvals.length * 2 > total) {
+      updates.status = 'approved';
+      updates.decision = 'majority';
+    } else if (declines.length * 2 > total) {
+      updates.status = 'declined';
+      updates.decision = 'majority';
+    } else if (approvals.length + declines.length >= total) {
+      const eldest = eldestOwnerUid(p.ownerIds);
+      updates.status = approvals.includes(eldest) ? 'approved' : 'declined';
+      updates.decision = 'eldest';
+    }
+    try {
+      await updateDoc(doc(db, 'giveProposals', p.id), updates);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `giveProposals/${p.id}`);
+    }
+  }
+
+  async function handleCompleteGive(p: GiveProposal) {
+    const rec = findGiveRecord(p.collectionName, p.recordId);
+    if (!rec) {
+      setGiveFeedback('That record could not be found on this device.');
+      return;
+    }
+    try {
+      const ok = await executeGive(
+        p.collectionName,
+        rec,
+        p.toUid,
+        p.toFamilyId,
+        p.toLabel,
+        p.decision || 'majority'
+      );
+      if (ok) {
+        await updateDoc(doc(db, 'giveProposals', p.id), {
+          status: 'done',
+          updatedAt: serverTimestamp(),
+        });
+        setGiveFeedback(`Given. ${p.recordTitle} now belongs to ${p.toLabel}.`);
+      }
+    } catch (err) {
+      setGiveFeedback(err instanceof Error ? err.message : 'The give could not be completed.');
     }
   }
 
@@ -5897,6 +6197,138 @@ function MainApp() {
               )}
               {boxFeedback && (
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">{boxFeedback}</p>
+              )}
+            </div>
+
+            <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                Giving
+              </h3>
+              <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                Depositing a record never moves its ownership — a household, a family, or a
+                circle only holds what you file. The one way ownership moves is a gift: you
+                give a record to a person, or to a family, and then it is theirs. A record
+                with several owners is given by majority vote of its owners; a tie goes to
+                the eldest of them. Every give is written in the record's gift log.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                  <span>Give to:</span>
+                  <select
+                    value={giveTarget}
+                    onChange={(e) => setGiveTarget(e.target.value)}
+                    className="min-h-[34px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                  >
+                    <option value="">Pick a person or a family</option>
+                    {(() => {
+                      const map = new Map<string, string>();
+                      householdMembers.forEach((m) => map.set(m.userId, m.displayName));
+                      families.forEach((f) =>
+                        (f.people || []).forEach((pp) => {
+                          if (pp.userId && !map.has(pp.userId)) map.set(pp.userId, pp.name);
+                        })
+                      );
+                      return Array.from(map.entries())
+                        .filter(([uid]) => uid !== user.uid)
+                        .map(([uid, name]) => (
+                          <option key={uid} value={`person:${uid}`}>
+                            {name}
+                          </option>
+                        ));
+                    })()}
+                    {families.map((f) => (
+                      <option key={f.id} value={`family:${f.id}`}>
+                        The {f.name} family
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              {giveRows.length === 0 ? (
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Nothing here is yours to give yet.
+                </p>
+              ) : (
+                <div className="space-y-1.5">
+                  {giveRows.map((row) => {
+                    const owners = ownersOf(row.rec);
+                    return (
+                      <div
+                        key={`${row.collectionName}:${row.rec.id}`}
+                        className="flex items-center justify-between gap-2 px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                      >
+                        <span className="text-xs text-slate-900 dark:text-slate-100">
+                          {row.title}
+                          <span className="text-slate-500 dark:text-slate-400">
+                            {' '}
+                            — {row.kind} ·{' '}
+                            {owners.length <= 1 ? 'yours alone' : `${owners.length} owners`}
+                          </span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => void handleGive(row.collectionName, row.rec, row.title)}
+                          className="min-h-[30px] px-2.5 text-[11px] font-medium text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 hover:bg-teal-50 dark:hover:bg-teal-950/40 rounded-md"
+                        >
+                          Give
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {giveProposals
+                .filter((p) => p.status !== 'done')
+                .map((p) => (
+                  <div
+                    key={p.id}
+                    className="px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg space-y-1.5"
+                  >
+                    <p className="text-xs text-slate-600 dark:text-slate-300">
+                      {p.recordTitle} → {p.toLabel}: proposed by {p.proposedByName}.{' '}
+                      {p.approvals.length} of {p.ownerIds.length} owners in favor
+                      {p.declines.length > 0 ? `, ${p.declines.length} against` : ''}.
+                      {p.status === 'approved'
+                        ? ` Carried${p.decision === 'eldest' ? ' — the eldest decided the tie' : ''}.`
+                        : p.status === 'declined'
+                          ? ` Not carried${p.decision === 'eldest' ? ' — the eldest decided the tie' : ''}.`
+                          : ''}
+                    </p>
+                    {p.status === 'open' &&
+                      user &&
+                      p.ownerIds.includes(user.uid) &&
+                      !p.approvals.includes(user.uid) &&
+                      !p.declines.includes(user.uid) && (
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => void handleVoteGive(p, true)}
+                            className="min-h-[30px] px-2.5 text-[11px] font-medium text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 hover:bg-teal-50 dark:hover:bg-teal-950/40 rounded-md"
+                          >
+                            In favor
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleVoteGive(p, false)}
+                            className="min-h-[30px] px-2.5 text-[11px] font-medium text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-md"
+                          >
+                            Against
+                          </button>
+                        </div>
+                      )}
+                    {p.status === 'approved' && user && p.ownerIds.includes(user.uid) && (
+                      <button
+                        type="button"
+                        onClick={() => void handleCompleteGive(p)}
+                        className="min-h-[30px] px-2.5 text-[11px] font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-md"
+                      >
+                        Complete the give
+                      </button>
+                    )}
+                  </div>
+                ))}
+              {giveFeedback && (
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">{giveFeedback}</p>
               )}
             </div>
 

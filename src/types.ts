@@ -385,6 +385,8 @@ export interface ScheduleTask {
   userId: string;
   householdId: string;
   memberIds: string[];
+  ownerIds?: string[];
+  giftLog?: GiftEntry[];
   // Visibility (Jason, 2026-11-20): the tags carry access. scope names
   // the ring (absent = household); circleIds name custom circles whose
   // members join the audience; memberIds is the computed audience
@@ -421,6 +423,8 @@ export interface ScannedDocument {
   userId: string;
   householdId: string;
   memberIds: string[];
+  ownerIds?: string[];
+  giftLog?: GiftEntry[];
   // Visibility (Jason, 2026-11-20): the tags carry access. scope names
   // the ring (absent = household); circleIds name custom circles whose
   // members join the audience; memberIds is the computed audience
@@ -482,6 +486,8 @@ export interface JasonNote {
   userId: string;
   householdId: string;
   memberIds: string[];
+  ownerIds?: string[];
+  giftLog?: GiftEntry[];
   // Visibility (Jason, 2026-11-20): the tags carry access. scope names
   // the ring (absent = household); circleIds name custom circles whose
   // members join the audience; memberIds is the computed audience
@@ -680,6 +686,38 @@ export interface Family {
 // One counted person on a family's roster. birthYear is what
 // seniority is figured from; living=false marks someone the family
 // has lost (they stay on the roster — the circle doesn't forget).
+// One entry in a record's gift log: ownership moved, and the log
+// says from whom, to whom, and by what decision.
+export interface GiftEntry {
+  fromUid: string;
+  fromName: string;
+  toLabel: string;
+  atIso: string;
+  decision: 'owner' | 'majority' | 'eldest';
+}
+
+// A proposed give of a co-owned record (collection: giveProposals).
+// The owners vote; a majority carries it; a tie at full turnout
+// goes to the eldest of the owners. Period. (Jason, 2026-11-20.)
+export interface GiveProposal {
+  id: string;
+  collectionName: 'documents' | 'tasks' | 'propertyEntries' | 'financeEntries' | 'jasonNotes' | 'accountRecords';
+  recordId: string;
+  recordTitle: string;
+  ownerIds: string[];
+  proposedBy: string;
+  proposedByName: string;
+  toUid: string;
+  toFamilyId: string;
+  toLabel: string;
+  approvals: string[];
+  declines: string[];
+  status: 'open' | 'approved' | 'declined' | 'done';
+  decision?: 'majority' | 'eldest';
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
 // An account record (Jason, 2026-11-21): a login the desk keeps —
 // a bank, a medical portal, a personal account. Scoped exactly
 // like every other record (owner, household, memberIds audience,
@@ -693,6 +731,8 @@ export interface AccountRecord {
   userId: string;
   householdId: string;
   memberIds: string[];
+  ownerIds?: string[];
+  giftLog?: GiftEntry[];
   scope?: 'private' | 'household' | 'family' | 'circles';
   familyId?: string;
   circleIds?: string[];
@@ -976,6 +1016,8 @@ export interface PropertyEntry {
   userId: string;
   householdId: string;
   memberIds: string[];
+  ownerIds?: string[];
+  giftLog?: GiftEntry[];
   // Visibility (Jason, 2026-11-20): the tags carry access. scope names
   // the ring (absent = household); circleIds name custom circles whose
   // members join the audience; memberIds is the computed audience
@@ -1071,6 +1113,8 @@ export interface FinanceEntry {
   userId: string;
   householdId: string;
   memberIds: string[];
+  ownerIds?: string[];
+  giftLog?: GiftEntry[];
   // Visibility (Jason, 2026-11-20): the tags carry access. scope names
   // the ring (absent = household); circleIds name custom circles whose
   // members join the audience; memberIds is the computed audience
