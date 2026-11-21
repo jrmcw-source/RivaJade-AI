@@ -143,6 +143,7 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
     selectedTaskIndices: Record<number, boolean>;
     notes: string;
     paperLocation: string;
+    accountLocation: string;
     place: string;
     recordKind: RecordKind;
     customKindLabel: string;
@@ -153,6 +154,7 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
   // Inspector edit state
   const [editTagInput, setEditTagInput] = useState('');
   const [paperLocationInput, setPaperLocationInput] = useState('');
+  const [accountLocationInput, setAccountLocationInput] = useState('');
   const [placeInput, setPlaceInput] = useState('');
   const [kindInput, setKindInput] = useState<RecordKind>('personal');
   const [customKindInput, setCustomKindInput] = useState('');
@@ -330,6 +332,7 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
         selectedTaskIndices: selectedMap,
         notes: '',
         paperLocation: '',
+        accountLocation: '',
         recordKind: 'personal',
         customKindLabel: '',
         place:
@@ -363,6 +366,7 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
         fileName: rawImageFileName,
         notes: draftResult.notes,
         paperLocation: draftResult.paperLocation,
+        accountLocation: draftResult.accountLocation,
         place: draftResult.place,
         recordKind: draftResult.recordKind,
         customKindLabel:
@@ -433,6 +437,7 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
           doc.ocrText,
           doc.notes,
           doc.paperLocation,
+          doc.accountLocation || '',
           doc.tags.join(' '),
           doc.keyDetails.join(' '),
         ]
@@ -448,6 +453,7 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
 
   useEffect(() => {
     setPaperLocationInput(selectedDoc?.paperLocation || '');
+    setAccountLocationInput(selectedDoc?.accountLocation || '');
     setPlaceInput(selectedDoc?.place || '');
     setKindInput(selectedDoc?.recordKind || 'personal');
     setCustomKindInput(selectedDoc?.customKindLabel || '');
@@ -790,6 +796,7 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
                   e.preventDefault();
                   void onUpdateDocument(selectedDoc.id, {
                     paperLocation: paperLocationInput.trim(),
+                    accountLocation: accountLocationInput.trim(),
                     place: placeInput,
                     recordKind: kindInput,
                     customKindLabel:
@@ -812,6 +819,36 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
                   Save Location
                 </button>
               </form>
+              {(kindInput === 'official' || kindInput === 'financial') && (
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                    Where the account lives
+                  </label>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void onUpdateDocument(selectedDoc.id, {
+                        accountLocation: accountLocationInput.trim(),
+                      });
+                    }}
+                    className="flex gap-2"
+                  >
+                    <input
+                      type="text"
+                      value={accountLocationInput}
+                      onChange={(e) => setAccountLocationInput(e.target.value)}
+                      placeholder="Bank or office, and its address — where the account itself is held"
+                      className="flex-1 min-h-[40px] px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                    />
+                    <button
+                      type="submit"
+                      className="min-h-[40px] px-3 text-xs font-medium text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-lg"
+                    >
+                      Save
+                    </button>
+                  </form>
+                </div>
+              )}
             </div>
 
             {/* Keyword Tags Editor */}
@@ -1267,6 +1304,23 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
                     compares it against the paper itself.
                   </p>
                 </div>
+
+                {(draftResult.recordKind === 'official' || draftResult.recordKind === 'financial') && (
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                      Where does the account live?
+                    </label>
+                    <input
+                      type="text"
+                      value={draftResult.accountLocation}
+                      onChange={(e) =>
+                        setDraftResult({ ...draftResult, accountLocation: e.target.value })
+                      }
+                      placeholder="e.g., First Bank, Main Street branch — the place the account itself is held"
+                      className="w-full min-h-[42px] px-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                    />
+                  </div>
+                )}
 
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-slate-700 dark:text-slate-300">

@@ -461,6 +461,7 @@ service cloud.firestore {
           'familyId',
           'circleIds',
           'encrypted',
+          'accountLocation',
           'recordKind',
           'customKindLabel',
           'createdAt',
@@ -510,7 +511,8 @@ service cloud.firestore {
         && data.get('driveFileId', '').size() <= 128
         && data.createdAt is timestamp
         && data.updatedAt is timestamp
-        && (!('encrypted' in data) || data.encrypted is bool);
+        && (!('encrypted' in data) || data.encrypted is bool)
+        && (!('accountLocation' in data) || (data.accountLocation is string && data.accountLocation.size() <= 200));
     }
 
     function isValidVoiceMemory(data) {
@@ -1035,6 +1037,7 @@ service cloud.firestore {
           'familyId',
           'circleIds',
           'encrypted',
+          'accountLocation',
           'createdAt',
           'updatedAt'
         ])
@@ -1074,7 +1077,8 @@ service cloud.firestore {
         && data.linkedDocumentId.size() <= 128
         && data.createdAt is timestamp
         && data.updatedAt is timestamp
-        && (!('encrypted' in data) || data.encrypted is bool);
+        && (!('encrypted' in data) || data.encrypted is bool)
+        && (!('accountLocation' in data) || (data.accountLocation is string && data.accountLocation.size() <= 200));
     }
 
 

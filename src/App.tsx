@@ -2724,6 +2724,7 @@ function MainApp() {
         verifiedByName: '',
         verifiedAtIso: '',
         paperLocation: (payload.paperLocation || '').slice(0, 200),
+        accountLocation: (payload.accountLocation || '').slice(0, 200),
         recordKind: payload.recordKind || 'personal',
         customKindLabel:
           payload.recordKind === 'custom' ? (payload.customKindLabel || '').slice(0, 60) : '',
@@ -2763,6 +2764,8 @@ function MainApp() {
         clean.verifiedAtIso = updates.verifiedAtIso.slice(0, 40);
       if (updates.paperLocation !== undefined)
         clean.paperLocation = updates.paperLocation.slice(0, 200);
+      if (updates.accountLocation !== undefined)
+        clean.accountLocation = updates.accountLocation.slice(0, 200);
       if (updates.driveFileId !== undefined)
         clean.driveFileId = updates.driveFileId.slice(0, 128);
       if (updates.place !== undefined) clean.place = updates.place.slice(0, 60);
@@ -3334,6 +3337,7 @@ function MainApp() {
         amount: Math.max(0, Math.min(10000000, Number(payload.amount) || 0)),
         entryDate: payload.entryDate,
         vendor: (payload.vendor || '').slice(0, 120),
+        accountLocation: (payload.accountLocation || '').slice(0, 200),
         place: (payload.place || '').slice(0, 60),
         careForJason: Boolean(payload.careForJason),
         taxDeductible: Boolean(payload.taxDeductible),
@@ -3368,6 +3372,8 @@ function MainApp() {
         clean.amount = Math.max(0, Math.min(10000000, Number(updates.amount) || 0));
       if (updates.entryDate !== undefined) clean.entryDate = updates.entryDate;
       if (updates.vendor !== undefined) clean.vendor = updates.vendor.slice(0, 120);
+      if (updates.accountLocation !== undefined)
+        clean.accountLocation = updates.accountLocation.slice(0, 200);
       if (updates.place !== undefined) clean.place = updates.place.slice(0, 60);
       if (updates.careForJason !== undefined) clean.careForJason = Boolean(updates.careForJason);
       if (updates.taxDeductible !== undefined) clean.taxDeductible = Boolean(updates.taxDeductible);
@@ -4585,7 +4591,9 @@ function MainApp() {
                   while your vault is unlocked. Official papers are sealed from the
                   start; any other kind can be sealed too. If you forget the
                   passphrase, sealed records cannot be opened again. There is no back
-                  door and no reset.
+                  door. The one exception is the family rule — a family's head,
+                  allowed by a vote of the members, can reset it — and that
+                  recovery is the next piece being built.
                 </p>
                 {!userProfile?.vaultCheck ? (
                   <div className="space-y-2">

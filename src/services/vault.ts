@@ -11,12 +11,24 @@
 // passphrase, tampered ciphertext, tampered IV, IV uniqueness across
 // 1,000 seals, and salt isolation — 18 of 18 checks passed.
 //
+// Standing choice (Jason, 2026-11-21): the Mozilla family. Web Crypto
+// is the open W3C standard; Firefox's implementation of it is
+// Mozilla's own NSS library, so in Jason's browser Mozilla's code
+// does this work. The desk uses the standard only — no vendor-
+// specific crypto and no third-party crypto library — until a whole
+// new system is imagined.
+//
 // The key lives in memory only, like the Gmail token: closing the app
 // locks the vault. The passphrase itself is never stored anywhere;
 // the profile keeps only a random salt and a sealed check value, so
-// an unlock attempt can be verified without keeping the key. There
-// is no back door and no reset — a forgotten passphrase means sealed
-// records stay sealed, which the Settings panel says in plain words.
+// an unlock attempt can be verified without keeping the key. For a
+// person alone there is no back door and no reset — a forgotten
+// passphrase means sealed records stay sealed, which the Settings
+// panel says in plain words. The one governed exception is Jason's
+// family ruling (2026-11-21): a family's head keeps control over
+// the family's sealed records, and when the head's own access is
+// lost the members vote on allowing a reset — that recovery path
+// is designed in the privacy schema note and built as its own pass.
 
 const ITERATIONS = 600_000;
 const CHECK_PLAINTEXT = 'steward-vault-check-v1';

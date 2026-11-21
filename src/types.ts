@@ -363,6 +363,11 @@ export interface ScannedDocument {
   verifiedByName: string;
   verifiedAtIso: string;
   paperLocation: string;
+  // Where the digitized account itself lives (Jason, 2026-11-21):
+  // Official and Financial ownership records name the physical
+  // location of the account — the bank or office that holds it —
+  // alongside where the paper is kept.
+  accountLocation?: string;
   driveFileId: string;
   createdAt?: unknown;
   updatedAt?: unknown;
@@ -899,6 +904,7 @@ export interface FinanceEntry {
   amount: number;
   entryDate: string; // YYYY-MM-DD
   vendor: string;
+  accountLocation?: string;
   taxDeductible: boolean;
   place: string;
   careForJason: boolean;

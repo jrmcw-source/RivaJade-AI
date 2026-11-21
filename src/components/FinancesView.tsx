@@ -118,6 +118,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   const [taxDeductible, setTaxDeductible] = useState(false);
   const [notes, setNotes] = useState('');
   const [linkedDocumentId, setLinkedDocumentId] = useState('');
+  const [accountLocation, setAccountLocation] = useState('');
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
 
@@ -237,6 +238,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     setAmountStr('');
     setEntryDate(getLocalTodayIso());
     setVendor('');
+    setAccountLocation('');
     setPlace(
       defaultGroup === 'Conservancy'
         ? 'Riva Jade — Wildlife Conservancy'
@@ -274,6 +276,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     setTaxDeductible(entry.taxDeductible);
     setNotes(entry.notes);
     setLinkedDocumentId(entry.linkedDocumentId);
+    setAccountLocation(entry.accountLocation || '');
     setModalOpen(true);
   }
 
@@ -319,6 +322,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         taxDeductible,
         notes: notes.trim().slice(0, 2000),
         linkedDocumentId: linkedDocumentId || '',
+        accountLocation: accountLocation.trim().slice(0, 200),
       };
 
       if (editingEntry) {
@@ -1010,6 +1014,19 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                 ))}
                 </select>
               </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                Where the account lives
+              </label>
+              <input
+                type="text"
+                value={accountLocation}
+                onChange={(e) => setAccountLocation(e.target.value)}
+                placeholder="Bank or office, and its address — where the account itself is held"
+                className="w-full min-h-[42px] px-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+              />
             </div>
 
             <label className="flex items-center gap-2.5 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer pt-1">
