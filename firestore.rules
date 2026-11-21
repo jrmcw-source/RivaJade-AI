@@ -258,6 +258,8 @@ service cloud.firestore {
           'vaultCheck',
           'vaultRecoveryWrap',
           'vaultRecoveryCheck',
+          'wrapPublicKey',
+          'wrapPrivateSealed',
           'sealedKinds',
           'createdAt',
           'updatedAt'
@@ -294,6 +296,8 @@ service cloud.firestore {
         && (!('vaultCheck' in data) || (data.vaultCheck is string && data.vaultCheck.size() <= 400))
         && (!('vaultRecoveryWrap' in data) || (data.vaultRecoveryWrap is string && data.vaultRecoveryWrap.size() <= 400))
         && (!('vaultRecoveryCheck' in data) || (data.vaultRecoveryCheck is string && data.vaultRecoveryCheck.size() <= 400))
+        && (!('wrapPublicKey' in data) || (data.wrapPublicKey is string && data.wrapPublicKey.size() <= 2000))
+        && (!('wrapPrivateSealed' in data) || (data.wrapPrivateSealed is string && data.wrapPrivateSealed.size() <= 2400))
         && (!('sealedKinds' in data) || isBoundedStringList(data.sealedKinds, 6, 20));
     }
 
@@ -1106,6 +1110,7 @@ service cloud.firestore {
           'responsibleAge',
           'notYetIds',
           'childWriterIds',
+          'recovery',
           'createdAt',
           'updatedAt'
         ])
@@ -1125,6 +1130,49 @@ service cloud.firestore {
           || (data.responsibleAge is number && data.responsibleAge >= 0 && data.responsibleAge <= 120))
         && (!('notYetIds' in data) || isBoundedStringList(data.notYetIds, 100, 128))
         && (!('childWriterIds' in data) || isBoundedStringList(data.childWriterIds, 100, 128))
+        && (!('recovery' in data) || (data.recovery is map
+          && data.recovery.keys().hasOnly(['check', 'wraps', 'headKeyWrap'])
+          && data.recovery.check is string && data.recovery.check.size() <= 400
+          && data.recovery.wraps is map && data.recovery.wraps.size() <= 100
+          && (!('headKeyWrap' in data.recovery) || (data.recovery.headKeyWrap is string && data.recovery.headKeyWrap.size() <= 400))))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidResetRequest(data) {
+      return data.keys().hasAll([
+          'familyId',
+          'familyName',
+          'forUid',
+          'forName',
+          'headPublicKey',
+          'approvals',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'familyId',
+          'familyName',
+          'forUid',
+          'forName',
+          'headPublicKey',
+          'approvals',
+          'deliveryVaultKey',
+          'deliveryFamilyKey',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.familyId)
+        && data.familyName is string && data.familyName.size() <= 120
+        && isValidId(data.forUid)
+        && data.forName is string && data.forName.size() <= 120
+        && data.headPublicKey is string && data.headPublicKey.size() <= 2000
+        && isBoundedStringList(data.approvals, 100, 128)
+        && (!('deliveryVaultKey' in data) || (data.deliveryVaultKey is string && data.deliveryVaultKey.size() <= 2000))
+        && (!('deliveryFamilyKey' in data) || (data.deliveryFamilyKey is string && data.deliveryFamilyKey.size() <= 2000))
+        && data.status in ['open', 'delivered', 'done']
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -1712,8 +1760,75 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && existing().ownerId == request.auth.uid
-        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'memberIds', 'people', 'headMode', 'headNames', 'responsibleAge', 'notYetIds', 'childWriterIds', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'memberIds', 'people', 'headMode', 'headNames', 'responsibleAge', 'notYetIds', 'childWriterIds', 'recovery', 'updatedAt']);
+      allow update: if isVerifiedUser()
+        && isValidId(familyId)
+        && isValidFamily(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && request.auth.uid in existing().memberIds
+        && incoming().diff(existing()).affectedKeys().hasOnly(['recovery', 'updatedAt']);
       allow delete: if isVerifiedUser() && isValidId(familyId) && existing().ownerId == request.auth.uid;
+    }
+
+    match /wrapKeys/{userId} {
+      // Public wrap keys: readable by any signed-in user (a public
+      // key is public by design), writable only by its owner.
+      allow get: if isSignedIn() && isValidId(userId);
+      allow list: if isSignedIn();
+      allow create: if isVerifiedUser()
+        && isValidId(userId)
+        && userId == request.auth.uid
+        && incoming().keys().hasOnly(['userId', 'displayName', 'publicKey', 'updatedAt'])
+        && incoming().userId == request.auth.uid
+        && incoming().displayName is string && incoming().displayName.size() <= 120
+        && incoming().publicKey is string && incoming().publicKey.size() <= 2000
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(userId)
+        && userId == request.auth.uid
+        && incoming().keys().hasOnly(['userId', 'displayName', 'publicKey', 'updatedAt'])
+        && incoming().userId == request.auth.uid
+        && incoming().displayName is string && incoming().displayName.size() <= 120
+        && incoming().publicKey is string && incoming().publicKey.size() <= 2000
+        && incoming().updatedAt == request.time;
+      allow delete: if isVerifiedUser() && isValidId(userId) && userId == request.auth.uid;
+    }
+
+    match /resetRequests/{requestId} {
+      // A family head's vault reset request. Family members read
+      // and vote; the requester is the person locked out.
+      allow get: if isSignedIn() && isValidId(requestId)
+        && (existing().forUid == request.auth.uid
+          || request.auth.uid in familyData(existing().familyId).memberIds);
+      allow list: if isSignedIn()
+        && (resource.data.forUid == request.auth.uid
+          || request.auth.uid in familyData(resource.data.familyId).memberIds);
+      allow create: if isVerifiedUser()
+        && isValidId(requestId)
+        && isValidResetRequest(incoming())
+        && incoming().forUid == request.auth.uid
+        && incoming().approvals.size() == 0
+        && incoming().status == 'open'
+        && request.auth.uid in familyData(incoming().familyId).memberIds
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(requestId)
+        && isValidResetRequest(incoming())
+        && incoming().familyId == existing().familyId
+        && incoming().forUid == existing().forUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (request.auth.uid in familyData(existing().familyId).memberIds
+          || existing().forUid == request.auth.uid)
+        && incoming().approvals.hasAll(existing().approvals)
+        && (request.auth.uid in incoming().approvals || existing().forUid == request.auth.uid)
+        && incoming().diff(existing()).affectedKeys().hasOnly(['approvals', 'deliveryVaultKey', 'deliveryFamilyKey', 'status', 'updatedAt']);
+      allow delete: if isVerifiedUser() && isValidId(requestId)
+        && (existing().forUid == request.auth.uid
+          || familyData(existing().familyId).ownerId == request.auth.uid);
     }
 
     match /circles/{circleId} {

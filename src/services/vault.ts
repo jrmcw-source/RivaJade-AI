@@ -331,7 +331,236 @@ export function lockVault(): void {
   staged = null;
   recoveryKey = null;
   recoveryKeyB64Cache = null;
+  wrapPrivateKey = null;
+  wrapPublicKeyB64Cache = null;
+  familyKeys.clear();
+  ephemeralPrivateKey = null;
   notify();
+}
+
+// ---------------------------------------------------------------------------
+// Family recovery (Jason, 2026-11-21): the family's shared half of
+// the recovery law. Each account holder carries an RSA-OAEP wrap
+// keypair — the public half is public by design (it also sits in a
+// directory document so a head can reach it), the private half is
+// sealed under the holder's own vault key on their profile. The
+// head of a family makes a random family recovery key, wraps it to
+// every member's public key on the family record, and wraps their
+// own vault key under it. When the head loses their passphrase, the
+// members vote on a reset request; on a majority, a member unwraps
+// the head's vault key with the family key and delivers it — and
+// the family key — wrapped to an ephemeral public key the head
+// posted with the request. The head adopts the key, sets a new
+// passphrase (the pass-6 sweep), and re-wraps under the family key.
+// Validated by steward-family-recovery-validation.mjs: 10 of 10.
+
+let wrapPrivateKey: CryptoKey | null = null;
+let wrapPublicKeyB64Cache: string | null = null;
+const familyKeys = new Map<string, CryptoKey>();
+let ephemeralPrivateKey: CryptoKey | null = null;
+
+const RSA_PARAMS = {
+  name: 'RSA-OAEP',
+  modulusLength: 2048,
+  publicExponent: new Uint8Array([1, 0, 1]),
+  hash: 'SHA-256',
+} as const;
+
+async function generateWrapPair(): Promise<CryptoKeyPair> {
+  return globalThis.crypto.subtle.generateKey(RSA_PARAMS, true, ['encrypt', 'decrypt']);
+}
+
+// Make this device's wrap keypair (needs the vault unlocked — the
+// private half is sealed under the vault key). Returns what the
+// profile keeps; the public half also goes to the directory.
+export async function ensureWrapKeypair(): Promise<{
+  publicKeyB64: string;
+  privateSealed: string;
+}> {
+  if (!currentKey) throw new Error('The vault is locked.');
+  if (wrapPrivateKey && wrapPublicKeyB64Cache) {
+    const sealed = await sealBytes(
+      currentKey,
+      new Uint8Array(await globalThis.crypto.subtle.exportKey('pkcs8', wrapPrivateKey))
+    );
+    return { publicKeyB64: wrapPublicKeyB64Cache, privateSealed: sealed };
+  }
+  const pair = await generateWrapPair();
+  const pub = new Uint8Array(await globalThis.crypto.subtle.exportKey('spki', pair.publicKey));
+  const priv = new Uint8Array(await globalThis.crypto.subtle.exportKey('pkcs8', pair.privateKey));
+  wrapPrivateKey = pair.privateKey;
+  wrapPublicKeyB64Cache = bytesToB64(pub);
+  const privateSealed = await sealBytes(currentKey, priv);
+  return { publicKeyB64: wrapPublicKeyB64Cache, privateSealed };
+}
+
+export async function loadWrapKeypair(privateSealed: string, publicKeyB64: string): Promise<boolean> {
+  if (!currentKey) return false;
+  try {
+    const raw = await unsealBytes(currentKey, privateSealed);
+    wrapPrivateKey = await globalThis.crypto.subtle.importKey('pkcs8', raw as BufferSource, RSA_PARAMS, false, [
+      'decrypt',
+    ]);
+    wrapPublicKeyB64Cache = publicKeyB64;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function hasWrapKeypair(): boolean {
+  return wrapPrivateKey !== null;
+}
+
+export async function rsaWrapTo(publicKeyB64: string, bytes: Uint8Array): Promise<string> {
+  const pub = await globalThis.crypto.subtle.importKey('spki', b64ToBytes(publicKeyB64) as BufferSource, RSA_PARAMS, false, [
+    'encrypt',
+  ]);
+  const ct = await globalThis.crypto.subtle.encrypt({ name: 'RSA-OAEP' }, pub, bytes as BufferSource);
+  return bytesToB64(new Uint8Array(ct));
+}
+
+export async function rsaUnwrapMine(envelopeB64: string): Promise<Uint8Array> {
+  if (!wrapPrivateKey) throw new Error('No wrap keypair is loaded.');
+  const pt = await globalThis.crypto.subtle.decrypt(
+    { name: 'RSA-OAEP' },
+    wrapPrivateKey,
+    b64ToBytes(envelopeB64) as BufferSource
+  );
+  return new Uint8Array(pt);
+}
+
+// The family recovery key itself: made by the head at setup, held
+// per family in memory once a member unwraps their copy.
+export async function newFamilyRecoveryKey(): Promise<{ key: CryptoKey; rawB64: string }> {
+  const key = await globalThis.crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, [
+    'encrypt',
+    'decrypt',
+  ]);
+  const raw = new Uint8Array(await globalThis.crypto.subtle.exportKey('raw', key));
+  return { key, rawB64: bytesToB64(raw) };
+}
+
+export async function familyRecoveryCheck(key: CryptoKey): Promise<string> {
+  return sealWith(key, CHECK_PLAINTEXT);
+}
+
+export function setFamilyRecoveryKey(familyId: string, key: CryptoKey): void {
+  familyKeys.set(familyId, key);
+}
+
+export function getFamilyRecoveryKey(familyId: string): CryptoKey | null {
+  return familyKeys.get(familyId) || null;
+}
+
+export async function importFamilyRecoveryKey(familyId: string, rawB64: string): Promise<CryptoKey> {
+  const key = await globalThis.crypto.subtle.importKey(
+    'raw',
+    b64ToBytes(rawB64) as BufferSource,
+    { name: 'AES-GCM', length: 256 },
+    true,
+    ['encrypt', 'decrypt']
+  );
+  familyKeys.set(familyId, key);
+  return key;
+}
+
+// Wrap the CURRENT vault key under a family recovery key. The twin
+// derivation needs the passphrase once, the way the Drive recovery
+// wrap does.
+export async function wrapVaultKeyUnderFamily(
+  passphrase: string,
+  saltB64: string,
+  familyKey: CryptoKey
+): Promise<string> {
+  const twin = await deriveKey(passphrase, b64ToBytes(saltB64), true);
+  const raw = new Uint8Array(await globalThis.crypto.subtle.exportKey('raw', twin));
+  return sealBytes(familyKey, raw);
+}
+
+export async function unwrapVaultKeyWithFamily(
+  envelope: string,
+  familyKey: CryptoKey
+): Promise<Uint8Array> {
+  return unsealBytes(familyKey, envelope);
+}
+
+// Adopt a recovered vault key (from the family delivery): it must
+// open the profile's vault check before it becomes the vault key.
+export async function adoptVaultKeyBytes(rawBytes: Uint8Array, vaultCheck: string): Promise<boolean> {
+  try {
+    const key = await globalThis.crypto.subtle.importKey(
+      'raw',
+      rawBytes as BufferSource,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+    const opened = await unsealWith(key, vaultCheck);
+    if (opened !== CHECK_PLAINTEXT) return false;
+    currentKey = key;
+    notify();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// The head's one-time keypair for a reset request: the public half
+// rides on the request; the private half never leaves this device.
+export async function newEphemeralKeypair(): Promise<string> {
+  const pair = await generateWrapPair();
+  ephemeralPrivateKey = pair.privateKey;
+  const pub = new Uint8Array(await globalThis.crypto.subtle.exportKey('spki', pair.publicKey));
+  return bytesToB64(pub);
+}
+
+export async function unwrapEphemeral(envelopeB64: string): Promise<Uint8Array> {
+  if (!ephemeralPrivateKey) throw new Error('No reset is in progress on this device.');
+  const pt = await globalThis.crypto.subtle.decrypt(
+    { name: 'RSA-OAEP' },
+    ephemeralPrivateKey,
+    b64ToBytes(envelopeB64) as BufferSource
+  );
+  return new Uint8Array(pt);
+}
+
+export function clearEphemeral(): void {
+  ephemeralPrivateKey = null;
+}
+
+// Load this device's family recovery key from the member's own
+// wrap on the family record (needs the wrap keypair loaded).
+export async function loadFamilyRecoveryKeyFromWrap(
+  familyId: string,
+  envelopeB64: string
+): Promise<boolean> {
+  try {
+    const raw = await rsaUnwrapMine(envelopeB64);
+    await importFamilyRecoveryKey(familyId, bytesToB64(raw));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function exportFamilyRecoveryKeyRaw(familyId: string): Promise<string | null> {
+  const key = familyKeys.get(familyId);
+  if (!key) return null;
+  try {
+    const raw = new Uint8Array(await globalThis.crypto.subtle.exportKey('raw', key));
+    return bytesToB64(raw);
+  } catch {
+    return null;
+  }
+}
+
+export function bytesToB64Public(bytes: Uint8Array): string {
+  return bytesToB64(bytes);
+}
+
+export function b64ToBytesPublic(text: string): Uint8Array {
+  return b64ToBytes(text);
 }
 
 export async function sealText(plaintext: string): Promise<string> {

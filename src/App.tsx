@@ -81,6 +81,8 @@ import {
   FamilyPerson,
   Circle,
   familyHeadName,
+  familyHeadUid,
+  ResetRequest,
   ProjectInvite,
   ProjectMember,
   ProjectTask,
@@ -135,6 +137,25 @@ import {
   subscribeVault,
   unlockVault,
   unsealText,
+  adoptVaultKeyBytes,
+  b64ToBytesPublic,
+  bytesToB64Public,
+  clearEphemeral,
+  ensureWrapKeypair,
+  exportFamilyRecoveryKeyRaw,
+  familyRecoveryCheck,
+  getFamilyRecoveryKey,
+  hasWrapKeypair,
+  importFamilyRecoveryKey,
+  loadFamilyRecoveryKeyFromWrap,
+  loadWrapKeypair,
+  newEphemeralKeypair,
+  newFamilyRecoveryKey,
+  rsaWrapTo,
+  setFamilyRecoveryKey,
+  unwrapEphemeral,
+  unwrapVaultKeyWithFamily,
+  wrapVaultKeyUnderFamily,
 } from './services/vault';
 import { PWAInstallModalTrigger } from './components/PWAInstallModal';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
@@ -331,6 +352,13 @@ function MainApp() {
   const [ownMailBriefings, setOwnMailBriefings] = useState<MailBriefing[]>([]);
   const [ownCircleBriefings, setOwnCircleBriefings] = useState<CircleBriefing[]>([]);
   const [families, setFamilies] = useState<Family[]>([]);
+  const [resetRequests, setResetRequests] = useState<ResetRequest[]>([]);
+  const [wrapKeyMap, setWrapKeyMap] = useState<Record<string, string>>({});
+  const [wrapReady, setWrapReady] = useState(false);
+  const [familyRecoveryPass, setFamilyRecoveryPass] = useState('');
+  const [familyRecoveryFeedback, setFamilyRecoveryFeedback] = useState('');
+  const [familyRewrapId, setFamilyRewrapId] = useState('');
+  const [resetToClose, setResetToClose] = useState('');
   const [circles, setCircles] = useState<Circle[]>([]);
   const [households, setHouseholds] = useState<Household[]>([]);
   const [selectedHouseholdId, setSelectedHouseholdId] = useState<string>('');
@@ -806,6 +834,65 @@ function MainApp() {
       unsubCircleBriefings();
       unsubFamilies();
       unsubCircles();
+
+  // Family recovery (Jason, 2026-11-21): reset requests for my
+  // families, and the public wrap keys of their account holders.
+  useEffect(() => {
+    if (!user || families.length === 0) {
+      setResetRequests([]);
+      return;
+    }
+    const ids = families.map((f) => f.id).slice(0, 10);
+    const unsub = onSnapshot(
+      query(collection(db, 'resetRequests'), where('familyId', 'in', ids)),
+      (snap) => {
+        setResetRequests(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ResetRequest, 'id'>) }))
+        );
+      },
+      () => {}
+    );
+    return () => unsub();
+  }, [user, families]);
+
+  useEffect(() => {
+    if (!user || families.length === 0) return;
+    const memberUids = Array.from(new Set(families.flatMap((f) => f.memberIds))).slice(0, 30);
+    if (memberUids.length === 0) return;
+    const unsub = onSnapshot(
+      query(collection(db, 'wrapKeys'), where('userId', 'in', memberUids)),
+      (snap) => {
+        const map: Record<string, string> = {};
+        snap.docs.forEach((d) => {
+          const data = d.data() as { userId?: string; publicKey?: string };
+          if (data.userId && data.publicKey) map[data.userId] = data.publicKey;
+        });
+        setWrapKeyMap(map);
+      },
+      () => {}
+    );
+    return () => unsub();
+  }, [user, families]);
+
+  // Once the vault opens, this device's wrap keypair exists and is
+  // loaded — family recovery rides on it.
+  useEffect(() => {
+    if (vaultUnlockedState && userProfile?.vaultSalt) {
+      void ensureWrapKeypairPersisted();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vaultUnlockedState]);
+
+  // Load my families' recovery keys from my wraps when possible.
+  useEffect(() => {
+    if (!user || !wrapReady) return;
+    for (const f of families) {
+      const wrap = f.recovery?.wraps?.[user.uid];
+      if (wrap && !getFamilyRecoveryKey(f.id)) {
+        void loadFamilyRecoveryKeyFromWrap(f.id, wrap);
+      }
+    }
+  }, [user, families, wrapReady]);
       unsubProjects();
       unsubInvitesEmail();
       unsubInvitesUid();
@@ -1870,6 +1957,8 @@ function MainApp() {
     vaultCheck?: string;
     vaultRecoveryWrap?: string;
     vaultRecoveryCheck?: string;
+    wrapPublicKey?: string;
+    wrapPrivateSealed?: string;
     sealedKinds?: RecordKind[];
   }) {
     if (!user) return;
@@ -2075,6 +2164,164 @@ function MainApp() {
     }
   }
 
+
+  // ---- Family recovery (Jason, 2026-11-21) ----
+
+  // After the vault opens: this account's wrap keypair exists (the
+  // private half sealed under the vault key on the profile), the
+  // public half sits in the directory, and the pair is loaded.
+  async function ensureWrapKeypairPersisted() {
+    if (!user || !userProfile) return;
+    try {
+      if (!userProfile.wrapPublicKey || !userProfile.wrapPrivateSealed) {
+        const made = await ensureWrapKeypair();
+        await handleUpdateDeskPrefs({
+          wrapPublicKey: made.publicKeyB64,
+          wrapPrivateSealed: made.privateSealed,
+        });
+        await setDoc(doc(db, 'wrapKeys', user.uid), {
+          userId: user.uid,
+          displayName: userProfile.displayName || user.displayName || 'Member',
+          publicKey: made.publicKeyB64,
+          updatedAt: serverTimestamp(),
+        });
+      } else if (!hasWrapKeypair()) {
+        await loadWrapKeypair(userProfile.wrapPrivateSealed, userProfile.wrapPublicKey);
+      }
+      setWrapReady(true);
+    } catch {
+      // The keypair can be made again on the next unlock.
+    }
+  }
+
+  // The head sets family recovery up: a fresh family key, checked,
+  // wrapped to every account holder's public key, with the head's
+  // own vault key wrapped under it. Needs the head's passphrase
+  // once, typed here.
+  async function handleSetupFamilyRecovery(family: Family) {
+    if (!user || !userProfile?.vaultSalt) return;
+    if (!familyRecoveryPass) {
+      setFamilyRecoveryFeedback('Type your vault passphrase once so your key can be wrapped for the family.');
+      return;
+    }
+    if (!hasWrapKeypair()) {
+      setFamilyRecoveryFeedback('Unlock your vault first — your wrap keypair loads with it.');
+      return;
+    }
+    try {
+      const { key, rawB64 } = await newFamilyRecoveryKey();
+      const check = await familyRecoveryCheck(key);
+      const raw = b64ToBytesPublic(rawB64);
+      const wraps: Record<string, string> = {};
+      for (const memberUid of family.memberIds) {
+        const pub = memberUid === user.uid ? userProfile.wrapPublicKey : wrapKeyMap[memberUid];
+        if (pub) wraps[memberUid] = await rsaWrapTo(pub, raw);
+      }
+      if (!wraps[user.uid]) {
+        setFamilyRecoveryFeedback('Your own wrap key is not ready yet. Lock and unlock your vault, then try again.');
+        return;
+      }
+      const headKeyWrap = await wrapVaultKeyUnderFamily(familyRecoveryPass, userProfile.vaultSalt, key);
+      await updateDoc(doc(db, 'families', family.id), {
+        recovery: { check, wraps, headKeyWrap },
+        updatedAt: serverTimestamp(),
+      });
+      setFamilyRecoveryKey(family.id, key);
+      setFamilyRecoveryPass('');
+      setFamilyRecoveryFeedback(
+        `Family recovery is set up for ${family.name}. If you ever lose your passphrase, the family can vote to hand your key back.`
+      );
+    } catch (err) {
+      setFamilyRecoveryFeedback(
+        err instanceof Error ? err.message : 'Family recovery could not be set up.'
+      );
+    }
+  }
+
+  // The head, locked out, asks the family for a reset. The one-time
+  // public key rides on the request; its private half stays here.
+  async function handleRequestReset(family: Family) {
+    if (!user || !userProfile) return;
+    try {
+      const headPublicKey = await newEphemeralKeypair();
+      const id = createSafeId('reset');
+      await setDoc(doc(db, 'resetRequests', id), {
+        familyId: family.id,
+        familyName: family.name,
+        forUid: user.uid,
+        forName: userProfile.displayName || user.displayName || 'The head of the family',
+        headPublicKey,
+        approvals: [],
+        status: 'open',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setVaultFeedback(
+        `Your family has your reset request for ${family.name}. When more than half of the account holders approve it, the desk will hand your key back to this device.`
+      );
+    } catch (err) {
+      setVaultFeedback(err instanceof Error ? err.message : 'The reset request could not be sent.');
+    }
+  }
+
+  // A member approves. Past half of the account holders, an
+  // approver holding the family key delivers the head's vault key
+  // and the family key, each wrapped to the request's one-time key.
+  async function handleApproveReset(req: ResetRequest) {
+    if (!user) return;
+    const family = families.find((f) => f.id === req.familyId);
+    if (!family) return;
+    try {
+      const approvals = Array.from(new Set([...(req.approvals || []), user.uid]));
+      const updates: Record<string, unknown> = { approvals, updatedAt: serverTimestamp() };
+      const famKey = getFamilyRecoveryKey(family.id);
+      if (
+        approvals.length * 2 > family.memberIds.length &&
+        famKey &&
+        family.recovery?.headKeyWrap &&
+        req.status === 'open'
+      ) {
+        const headRaw = await unwrapVaultKeyWithFamily(family.recovery.headKeyWrap, famKey);
+        const famRawB64 = await exportFamilyRecoveryKeyRaw(family.id);
+        if (famRawB64) {
+          updates.deliveryVaultKey = await rsaWrapTo(req.headPublicKey, headRaw);
+          updates.deliveryFamilyKey = await rsaWrapTo(req.headPublicKey, b64ToBytesPublic(famRawB64));
+          updates.status = 'delivered';
+        }
+      }
+      await updateDoc(doc(db, 'resetRequests', req.id), updates);
+    } catch {
+      // The vote can be tapped again.
+    }
+  }
+
+  // The head takes the delivery: unwrap, adopt the key (it must
+  // open the vault check), take the family key too, then the
+  // change-passphrase form below finishes the reset and re-wraps.
+  async function handleFinishReset(req: ResetRequest) {
+    if (!userProfile?.vaultCheck) return;
+    try {
+      if (!req.deliveryVaultKey || !req.deliveryFamilyKey) return;
+      const headRaw = await unwrapEphemeral(req.deliveryVaultKey);
+      const ok = await adoptVaultKeyBytes(headRaw, userProfile.vaultCheck);
+      if (!ok) {
+        setVaultFeedback('That delivery did not open your vault. Ask the family to send it again.');
+        return;
+      }
+      const famRaw = await unwrapEphemeral(req.deliveryFamilyKey);
+      await importFamilyRecoveryKey(req.familyId, bytesToB64Public(famRaw));
+      clearEphemeral();
+      setVaultRecovered(true);
+      setFamilyRewrapId(req.familyId);
+      setResetToClose(req.id);
+      setVaultFeedback(
+        'Your vault is open again. Set a new passphrase below — the desk re-seals your records and wraps your new key for the family.'
+      );
+    } catch {
+      setVaultFeedback('The delivery could not be unwrapped on this device.');
+    }
+  }
+
   async function handleReplaceRecoveryKey() {
     if (!userProfile?.vaultSalt || !userProfile?.vaultCheck) return;
     const ok = await unlockVault(vaultReplacePass, userProfile.vaultSalt, userProfile.vaultCheck);
@@ -2162,6 +2409,32 @@ function MainApp() {
       });
       await batch.commit();
       commitStagedPassphrase();
+      // Family recovery: re-wrap the new key for the family and
+      // close the reset request that brought us here.
+      if (familyRewrapId) {
+        try {
+          const fam = families.find((f) => f.id === familyRewrapId);
+          const famKey = getFamilyRecoveryKey(familyRewrapId);
+          if (fam && famKey && fam.recovery) {
+            const newWrap = await wrapVaultKeyUnderFamily(vaultNewPass, stage.salt, famKey);
+            await updateDoc(doc(db, 'families', fam.id), {
+              'recovery.headKeyWrap': newWrap,
+              updatedAt: serverTimestamp(),
+            });
+          }
+          if (resetToClose) {
+            await updateDoc(doc(db, 'resetRequests', resetToClose), {
+              status: 'done',
+              updatedAt: serverTimestamp(),
+            });
+          }
+        } catch {
+          // The passphrase reset itself already landed; the family
+          // wrap can be refreshed by setting recovery up again.
+        }
+        setFamilyRewrapId('');
+        setResetToClose('');
+      }
       setVaultRecovered(false);
       setShowChangePass(false);
       setVaultNewPass('');
@@ -5037,6 +5310,62 @@ function MainApp() {
                     </div>
                   </div>
                 )}
+                {!vaultUnlockedState &&
+                  families
+                    .filter((f) => familyHeadUid(f) === user.uid && f.recovery)
+                    .map((f) => {
+                      const mine = resetRequests.find(
+                        (r) => r.familyId === f.id && r.forUid === user.uid && r.status !== 'done'
+                      );
+                      return (
+                        <div
+                          key={f.id}
+                          className="space-y-2 pt-1 border-t border-slate-100 dark:border-slate-800"
+                        >
+                          <p className="text-xs font-medium text-slate-700 dark:text-slate-200">
+                            Family reset — {f.name}
+                          </p>
+                          {!mine ? (
+                            <>
+                              <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+                                You head this family, and its recovery is set up. If the
+                                passphrase is gone for good, the family can vote to hand your
+                                key back to this device. More than half of the account holders
+                                have to approve. Without the vote, your sealed records stay
+                                sealed.
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => void handleRequestReset(f)}
+                                className="min-h-[42px] px-3.5 text-xs font-medium text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-lg"
+                              >
+                                Ask my family to reset my passphrase
+                              </button>
+                            </>
+                          ) : mine.status === 'delivered' ? (
+                            <>
+                              <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+                                The family voted yes, and your key has been delivered to this
+                                device.
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => void handleFinishReset(mine)}
+                                className="min-h-[42px] px-3.5 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-lg"
+                              >
+                                Take back my vault
+                              </button>
+                            </>
+                          ) : (
+                            <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+                              Your family is voting — {mine.approvals.length} of{' '}
+                              {f.memberIds.length} account holders have approved. It takes
+                              more than half.
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
                 <div className="space-y-1.5 pt-1">
                   {(Object.keys(RECORD_KIND_LABELS) as RecordKind[]).map((kind) => (
                     <label
@@ -5302,6 +5631,88 @@ function MainApp() {
                               cousins who never open the app are family too, and nobody is
                               taken off it when they die. The family doesn't forget.
                             </p>
+                            {familyHeadUid(f) === user.uid &&
+                              (!f.recovery ? (
+                                <div className="space-y-2 pt-1">
+                                  <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                                    Family recovery is not set up for this family yet. You
+                                    head it, so the choice is yours: the desk makes a family
+                                    recovery key, hands a wrapped copy to every account
+                                    holder, and wraps your vault key under it. If you ever
+                                    lose your passphrase, the family votes — more than half
+                                    the account holders — and the desk hands your key back.
+                                    Without the vote, your sealed records stay sealed.
+                                  </p>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <input
+                                      type="password"
+                                      value={familyRecoveryPass}
+                                      onChange={(e) => setFamilyRecoveryPass(e.target.value)}
+                                      placeholder="Your vault passphrase, once"
+                                      className="min-h-[38px] px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleSetupFamilyRecovery(f)}
+                                      className="min-h-[38px] px-3 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-lg"
+                                    >
+                                      Set up family recovery
+                                    </button>
+                                  </div>
+                                  {familyRecoveryFeedback && (
+                                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                      {familyRecoveryFeedback}
+                                    </p>
+                                  )}
+                                </div>
+                              ) : (
+                                <p className="text-xs text-slate-500 dark:text-slate-400 pt-1">
+                                  Family recovery is set up — wrapped for{' '}
+                                  {Object.keys(f.recovery.wraps || {}).length} of{' '}
+                                  {f.memberIds.length} account holders. If you lose your
+                                  passphrase, the family can vote your key back from the
+                                  sealed-records section above.
+                                </p>
+                              ))}
+                            {resetRequests
+                              .filter((r) => r.familyId === f.id && r.status !== 'done')
+                              .map((r) => (
+                                <div
+                                  key={r.id}
+                                  className="space-y-1.5 pt-1 border-t border-slate-100 dark:border-slate-800"
+                                >
+                                  {r.forUid === user.uid ? (
+                                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                                      Your reset request is with the family — {r.approvals.length}{' '}
+                                      approval{r.approvals.length === 1 ? '' : 's'} so far
+                                      {r.status === 'delivered'
+                                        ? ', and your key has been delivered. Take it back from the sealed-records section above.'
+                                        : '.'}
+                                    </p>
+                                  ) : (
+                                    <>
+                                      <p className="text-xs text-slate-600 dark:text-slate-300">
+                                        {r.forName}, head of this family, has lost their vault
+                                        passphrase and asks the family for a reset.{' '}
+                                        {r.approvals.length} of {f.memberIds.length} account
+                                        holders have approved; it takes more than half.
+                                        {r.status === 'delivered'
+                                          ? ' The key has been delivered.'
+                                          : ''}
+                                      </p>
+                                      {!r.approvals.includes(user.uid) && r.status === 'open' && (
+                                        <button
+                                          type="button"
+                                          onClick={() => void handleApproveReset(r)}
+                                          className="min-h-[38px] px-3 text-xs font-medium text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 hover:bg-teal-50 dark:hover:bg-teal-950/40 rounded-lg"
+                                        >
+                                          Approve the reset
+                                        </button>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              ))}
                             {f.ownerId === user.uid && (
                               <div className="flex flex-wrap items-center gap-2 pt-1">
                                 <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">

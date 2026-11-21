@@ -107,6 +107,18 @@ export const PLACE_JURISDICTIONS: Record<string, JurisdictionStack> = {
   },
 };
 
+// The head of a family as an account: the counted person whose
+// name the headship resolves to, when that person holds an
+// account; otherwise the family's owner (the family doc's creator
+// is the standing fallback until the roster names the head's
+// account). Used for gating head-only controls in the client; the
+// rules carry the membership checks.
+export function familyHeadUid(family: Family): string | null {
+  const name = familyHeadName(family);
+  const person = (family.people || []).find((p) => p.name === name && p.userId);
+  return person?.userId || family.ownerId || null;
+}
+
 export function jurisdictionFor(place: string): JurisdictionStack | null {
   if (PLACE_JURISDICTIONS[place]) return PLACE_JURISDICTIONS[place];
   for (const parent of Object.keys(PLACE_JURISDICTIONS)) {
@@ -349,6 +361,12 @@ export interface UserProfile {
   // Drive; a forgotten passphrase does not lock the depositor out.
   vaultRecoveryWrap?: string;
   vaultRecoveryCheck?: string;
+  // Family recovery (Jason, 2026-11-21): an RSA wrap keypair. The
+  // public half is public by design; the private half is sealed
+  // under the owner's vault key and never leaves the profile in
+  // the clear.
+  wrapPublicKey?: string;
+  wrapPrivateSealed?: string;
   sealedKinds?: RecordKind[];
   createdAt?: unknown;
   updatedAt?: unknown;
@@ -634,6 +652,13 @@ export interface Family {
   // write to the calendar unless a parent grants it.
   notYetIds?: string[];
   childWriterIds?: string[];
+  // Family recovery (Jason, 2026-11-21): the family's recovery key,
+  // set up by its head. check is the standing check text sealed
+  // under the family key; wraps carries the family key wrapped to
+  // each account member's public wrap key; headKeyWrap is the
+  // head's own vault key sealed under the family key — the thing a
+  // members' vote can hand back after a lost passphrase.
+  recovery?: FamilyRecovery;
   // The counted people (Jason, 2026-11-20): the family roster holds
   // people, not just accounts — cousins who never open the app are
   // family too. Headship of the giant circle descends by seniority
@@ -647,6 +672,44 @@ export interface Family {
 // One counted person on a family's roster. birthYear is what
 // seniority is figured from; living=false marks someone the family
 // has lost (they stay on the roster — the circle doesn't forget).
+export interface FamilyRecovery {
+  check: string;
+  wraps: Record<string, string>;
+  headKeyWrap?: string;
+}
+
+// A head's reset request (collection: resetRequests). The head,
+// locked out of their vault but signed in as themselves, posts a
+// request carrying a one-time public key. Members approve by
+// adding their own uid; past half of the family's account holders,
+// an approver delivers the head's vault key and the family key,
+// each wrapped to that one-time key. The head unwraps, adopts the
+// key, and sets a new passphrase.
+export interface ResetRequest {
+  id: string;
+  familyId: string;
+  familyName: string;
+  forUid: string;
+  forName: string;
+  headPublicKey: string;
+  approvals: string[];
+  deliveryVaultKey?: string;
+  deliveryFamilyKey?: string;
+  status: 'open' | 'delivered' | 'done';
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+// A member's public wrap key in the directory (collection:
+// wrapKeys/{uid}) — public by design, so a family head can wrap
+// the family recovery key to every member.
+export interface WrapKeyDoc {
+  userId: string;
+  displayName: string;
+  publicKey: string;
+  updatedAt?: unknown;
+}
+
 export interface FamilyPerson {
   name: string;
   birthYear?: number;
