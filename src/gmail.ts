@@ -105,3 +105,71 @@ export async function fetchRecentMailSummary(
   }
   return lines.join('\n');
 }
+
+// Filing (Jason, 2026-11-21): the same fence, returning the recent
+// messages as structured entries so the owner can file one as a
+// record under privacy settings they pick. What the fence shuts
+// out cannot be filed either — the rules run here first, always.
+export interface MailFilingEntry {
+  id: string;
+  from: string;
+  subject: string;
+  date: string;
+  snippet: string;
+}
+
+export async function fetchMailForFiling(
+  accessToken: string,
+  rules: MailAccessRules = DEFAULT_MAIL_RULES
+): Promise<MailFilingEntry[]> {
+  const headers = { Authorization: `Bearer ${accessToken}` };
+  const query = encodeURIComponent('in:inbox newer_than:30d');
+  const listRes = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=30&q=${query}`,
+    { headers }
+  );
+  if (!listRes.ok) {
+    throw new Error(`Gmail list failed: HTTP ${listRes.status}`);
+  }
+  const list = (await listRes.json()) as { messages?: Array<{ id: string }> };
+  const ids = (list.messages || []).map((m) => m.id).slice(0, 30);
+  const only = senderList(rules.onlySenders);
+  const never = senderList(rules.neverSenders);
+  const entries: MailFilingEntry[] = [];
+  for (const id of ids) {
+    if (entries.length >= 20) break;
+    try {
+      const res = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+        { headers }
+      );
+      if (!res.ok) continue;
+      const msg = (await res.json()) as {
+        snippet?: string;
+        labelIds?: string[];
+        payload?: { headers?: Array<{ name: string; value: string }> };
+      };
+      const bucket = bucketOf(msg.labelIds || []);
+      if (bucket === 'people' && !rules.fromPeople) continue;
+      if (bucket === 'bills' && !rules.billsAndNotices) continue;
+      if (bucket === 'bulk' && !rules.newsletters) continue;
+      const byName = new Map(
+        (msg.payload?.headers || []).map((h) => [h.name.toLowerCase(), h.value])
+      );
+      const from = (byName.get('from') || 'Unknown sender').slice(0, 80);
+      const fromLower = from.toLowerCase();
+      if (never.some((n) => fromLower.includes(n))) continue;
+      if (only.length && !only.some((n) => fromLower.includes(n))) continue;
+      entries.push({
+        id,
+        from,
+        subject: (byName.get('subject') || '(no subject)').slice(0, 120),
+        date: (byName.get('date') || '').slice(0, 60),
+        snippet: (msg.snippet || '').replace(/\s+/g, ' ').trim().slice(0, 300),
+      });
+    } catch {
+      continue;
+    }
+  }
+  return entries;
+}

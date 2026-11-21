@@ -52,7 +52,7 @@ import {
   connectGmail,
   getGmailAccessToken,
 } from './firebase';
-import { fetchRecentMailSummary } from './gmail';
+import { fetchRecentMailSummary, fetchMailForFiling, type MailFilingEntry } from './gmail';
 import {
   AppNotification,
   CATEGORIES,
@@ -371,6 +371,12 @@ function MainApp() {
   const [dirFamilyId, setDirFamilyId] = useState('');
   const [dirEditingId, setDirEditingId] = useState('');
   const [dirFeedback, setDirFeedback] = useState('');
+  const [mailFileEntries, setMailFileEntries] = useState<MailFilingEntry[]>([]);
+  const [mailFileScope, setMailFileScope] = useState<'private' | 'household' | 'family'>('private');
+  const [mailFileFamilyId, setMailFileFamilyId] = useState('');
+  const [mailFileKind, setMailFileKind] = useState<RecordKind>('personal');
+  const [mailFiledIds, setMailFiledIds] = useState<string[]>([]);
+  const [mailFileFeedback, setMailFileFeedback] = useState('');
   const [sharedAccountRecords, setSharedAccountRecords] = useState<AccountRecord[]>([]);
   const [acctTitle, setAcctTitle] = useState('');
   const [acctUsername, setAcctUsername] = useState('');
@@ -2817,6 +2823,99 @@ function MainApp() {
       setDirFeedback('Your directory entry is removed.');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `directoryEntries/${entry.id}`);
+    }
+  }
+
+
+  // ---- Email filing (Jason, 2026-11-21) ----
+  // The owner of the mailbox files a message as a record, under
+  // privacy settings they pick. The fence runs first, on this
+  // device: what the mail rules shut out cannot be filed. The
+  // record holds the message's heading details and the preview
+  // Gmail shows; the original stays in the mailbox.
+
+  async function handleLoadMailForFiling() {
+    if (!userProfile) return;
+    const token = getGmailAccessToken();
+    if (!token) {
+      setMailFileFeedback('Connect your mail for this session first — the Connect mail button is on the front door — then come back here.');
+      return;
+    }
+    setMailFileFeedback('Reading your recent mail…');
+    try {
+      const entries = await fetchMailForFiling(token, {
+        fromPeople: userProfile.mailFromPeople !== false,
+        billsAndNotices: userProfile.mailBills !== false,
+        newsletters: Boolean(userProfile.mailNewsletters),
+        onlySenders: userProfile.mailOnlySenders || '',
+        neverSenders: userProfile.mailNeverSenders || '',
+      });
+      setMailFileEntries(entries);
+      setMailFileFeedback(
+        entries.length
+          ? 'Pick the reach and the kind, then file any message below.'
+          : 'No recent messages passed your mail rules.'
+      );
+    } catch (err) {
+      setMailFileFeedback(err instanceof Error ? err.message : 'The mail could not be read.');
+    }
+  }
+
+  async function handleFileMailMessage(entry: MailFilingEntry) {
+    if (!user) return;
+    const parsed = new Date(entry.date);
+    const detectedDate = Number.isNaN(parsed.getTime())
+      ? new Date().toISOString().slice(0, 10)
+      : parsed.toISOString().slice(0, 10);
+    try {
+      const id = await handleSaveDocument({
+        title: entry.subject || '(no subject)',
+        category: 'General',
+        place: '',
+        ocrText: [
+          `From: ${entry.from}`,
+          `Date: ${entry.date}`,
+          `Subject: ${entry.subject}`,
+          '',
+          entry.snippet,
+          '',
+          'Filed from the mailbox by its owner. The original message stays in the mailbox; this record holds its heading details and the preview Gmail shows.',
+        ].join('\n'),
+        summary: `Email from ${entry.from} — ${entry.subject}`.slice(0, 1000),
+        tags: ['email'],
+        keyDetails: [`From: ${entry.from}`, `Date: ${entry.date}`],
+        detectedDate,
+        imageUrl: '',
+        fileName: 'Email message',
+        notes: 'Filed from email.',
+        recordKind: mailFileKind,
+        customKindLabel: '',
+        accountLocation: '',
+      } as Omit<ScannedDocument, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'householdId' | 'memberIds' | 'verificationStatus' | 'verifiedByName' | 'verifiedAtIso' | 'paperLocation' | 'driveFileId'> & { paperLocation?: string });
+      if (!id) {
+        setMailFileFeedback('That message could not be filed.');
+        return;
+      }
+      if (mailFileScope !== 'household') {
+        const memberIds = audienceFor(
+          mailFileScope,
+          mailFileScope === 'family' ? mailFileFamilyId || activeFamily?.id || '' : '',
+          [],
+          activeHousehold?.householdId || '',
+          'documents'
+        );
+        await updateDoc(doc(db, 'documents', id), {
+          scope: mailFileScope,
+          familyId: mailFileScope === 'family' ? mailFileFamilyId || activeFamily?.id || '' : '',
+          circleIds: [],
+          memberIds,
+          updatedAt: serverTimestamp(),
+        });
+      }
+      setMailFiledIds((prev) => [...prev, entry.id]);
+      setMailFileFeedback(`Filed. "${entry.subject}" is now a record, ${mailFileScope === 'private' ? 'yours alone' : mailFileScope === 'family' ? 'shared with the family' : 'shared with your household'}.`);
+    } catch (err) {
+      setMailFileFeedback(err instanceof Error ? err.message : 'That message could not be filed.');
     }
   }
 
@@ -5783,6 +5882,95 @@ function MainApp() {
                   {mailRulesFeedback && (
                     <p className="text-xs text-teal-700 dark:text-teal-400">{mailRulesFeedback}</p>
                   )}
+                  <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                    <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                      File a message as a record
+                    </p>
+                    <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                      A message worth keeping becomes a record on the desk, under privacy
+                      settings you pick. Your mail rules above run first — a sender they
+                      shut out cannot be filed. The record holds the message's heading
+                      details and the preview Gmail shows; the original stays in your
+                      mailbox.
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        value={mailFileScope}
+                        onChange={(e) => setMailFileScope(e.target.value as 'private' | 'household' | 'family')}
+                        className="min-h-[34px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                      >
+                        <option value="private">Only me</option>
+                        <option value="household">My household</option>
+                        <option value="family">My family</option>
+                      </select>
+                      {mailFileScope === 'family' && (
+                        <select
+                          value={mailFileFamilyId}
+                          onChange={(e) => setMailFileFamilyId(e.target.value)}
+                          className="min-h-[34px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                        >
+                          <option value="">Pick the family</option>
+                          {families.map((f) => (
+                            <option key={f.id} value={f.id}>
+                              {f.name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      <select
+                        value={mailFileKind}
+                        onChange={(e) => setMailFileKind(e.target.value as RecordKind)}
+                        className="min-h-[34px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                      >
+                        <option value="personal">Personal</option>
+                        <option value="financial">Financial</option>
+                        <option value="medical">Medical</option>
+                        <option value="official">Official</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => void handleLoadMailForFiling()}
+                        className="min-h-[34px] px-3 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-md"
+                      >
+                        Show recent messages
+                      </button>
+                    </div>
+                    {mailFileFeedback && (
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">{mailFileFeedback}</p>
+                    )}
+                    {mailFileEntries.length > 0 && (
+                      <div className="space-y-1.5">
+                        {mailFileEntries.map((entry) => (
+                          <div
+                            key={entry.id}
+                            className="flex items-start justify-between gap-2 px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                          >
+                            <div className="min-w-0">
+                              <p className="text-xs font-medium text-slate-900 dark:text-slate-100 truncate">
+                                {entry.subject}
+                              </p>
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                                {entry.from} · {entry.date}
+                              </p>
+                              {entry.snippet && (
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2">
+                                  {entry.snippet}
+                                </p>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              disabled={mailFiledIds.includes(entry.id)}
+                              onClick={() => void handleFileMailMessage(entry)}
+                              className="shrink-0 min-h-[30px] px-2.5 text-[11px] font-medium text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 hover:bg-teal-50 dark:hover:bg-teal-950/40 rounded-md disabled:opacity-50"
+                            >
+                              {mailFiledIds.includes(entry.id) ? 'Filed' : 'File'}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
               <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-800">
