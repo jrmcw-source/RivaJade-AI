@@ -71,6 +71,8 @@ import {
   RecordKind,
   CircleBriefing,
   circleHeadIds,
+  childDeciderIds,
+  personIsMinor,
   upcomingOccasions,
   computeStreamLists,
   effectiveRecordKind,
@@ -366,6 +368,7 @@ function MainApp() {
   const [ownDirectoryEntries, setOwnDirectoryEntries] = useState<DirectoryEntry[]>([]);
   const [ownEmergencySheets, setOwnEmergencySheets] = useState<EmergencySheet[]>([]);
   const [sharedEmergencySheets, setSharedEmergencySheets] = useState<EmergencySheet[]>([]);
+  const [deciderEmergencySheets, setDeciderEmergencySheets] = useState<EmergencySheet[]>([]);
   const [sharedDirectoryEntries, setSharedDirectoryEntries] = useState<DirectoryEntry[]>([]);
   const [dirName, setDirName] = useState('');
   const [dirBirthday, setDirBirthday] = useState('');
@@ -398,6 +401,14 @@ function MainApp() {
   const [sheetScope, setSheetScope] = useState<'private' | 'household' | 'family'>('household');
   const [sheetFamilyId, setSheetFamilyId] = useState('');
   const [sheetFeedback, setSheetFeedback] = useState('');
+  const [sheetSubjectKey, setSheetSubjectKey] = useState('');
+  const [childEdits, setChildEdits] = useState<
+    Record<
+      string,
+      { parentIds: string[]; guardianIds: string[]; guardianshipDocId: string; delegateToHead: boolean }
+    >
+  >({});
+  const [childFeedback, setChildFeedback] = useState('');
   const [storageFamilyId, setStorageFamilyId] = useState('');
   const [stRootChoice, setStRootChoice] = useState<'default' | 'custom'>('default');
   const [stRootIdText, setStRootIdText] = useState('');
@@ -735,6 +746,18 @@ function MainApp() {
       (err) => handleFirestoreError(err, OperationType.LIST, 'emergencySheets')
     );
 
+    const unsubSheetDecider = onSnapshot(
+      query(collection(db, 'emergencySheets'), where('decidedByIds', 'array-contains', user.uid)),
+      (snap) => {
+        setDeciderEmergencySheets(
+          snap.docs
+            .map((d) => ({ id: d.id, ...(d.data() as Omit<EmergencySheet, 'id'>) }))
+            .filter((e) => e.userId !== user.uid)
+        );
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'emergencySheets')
+    );
+
     const unsubMemories = onSnapshot(
       query(collection(db, 'voiceMemories'), where('userId', '==', user.uid)),
       (snap) => {
@@ -1013,6 +1036,7 @@ function MainApp() {
       unsubDirOwn();
       unsubSheetOwn();
       unsubSheetShared();
+      unsubSheetDecider();
       unsubDirShared();
       unsubMemories();
       unsubJasonNotes();
@@ -1216,9 +1240,28 @@ function MainApp() {
     [ownDirectoryEntries, sharedDirectoryEntries]
   );
 
+  const childSubjectOptions = useMemo(
+    () =>
+      families.flatMap((fam) =>
+        (fam.people || [])
+          .filter((person) => personIsMinor(fam, person))
+          .map((person) => ({
+            key: `${fam.id}::${person.name}`,
+            label: `${person.name} (${fam.name})`,
+            subjectName: person.name,
+            subjectFamilyId: fam.id,
+          }))
+      ),
+    [families]
+  );
+
   const emergencySheets = useMemo(
-    () => mergeRecordsById(ownEmergencySheets, sharedEmergencySheets),
-    [ownEmergencySheets, sharedEmergencySheets]
+    () =>
+      mergeRecordsById(
+        mergeRecordsById(ownEmergencySheets, sharedEmergencySheets),
+        deciderEmergencySheets
+      ),
+    [ownEmergencySheets, sharedEmergencySheets, deciderEmergencySheets]
   );
 
   const propertyEntries = useMemo(
@@ -1310,6 +1353,16 @@ function MainApp() {
     kind: 'tasks' | 'documents' | 'finances' | 'property' | 'notes'
   ): boolean {
     if (!user || rec.userId === user.uid) return true;
+    // A child's record reaches the child's parents (Jason,
+    // 2026-11-21): a circle head's omissions do not hide a
+    // child's own record from the people the law put in charge
+    // of that child.
+    const subj = rec as { subjectName?: string; subjectFamilyId?: string };
+    if (subj.subjectName && subj.subjectFamilyId) {
+      const fam = families.find((f) => f.id === subj.subjectFamilyId);
+      const person = (fam?.people || []).find((pp) => pp.name === subj.subjectName);
+      if (person && childDeciderIds(person).includes(user.uid)) return true;
+    }
     const ids = rec.circleIds || [];
     if (ids.length === 0) return true;
     // Omissions speak the record kinds (Jason, 2026-11-21):
@@ -3852,6 +3905,73 @@ function MainApp() {
 
 
 
+  function myDeciderChildren(): Array<{ key: string; family: Family; person: FamilyPerson }> {
+    if (!user) return [];
+    const out: Array<{ key: string; family: Family; person: FamilyPerson }> = [];
+    for (const fam of families) {
+      for (const person of fam.people || []) {
+        if (personIsMinor(fam, person) && childDeciderIds(person).includes(user.uid)) {
+          out.push({ key: `${fam.id}::${person.name}`, family: fam, person });
+        }
+      }
+    }
+    return out;
+  }
+
+
+  function childEditFor(family: Family, person: FamilyPerson) {
+    const key = `${family.id}::${person.name}`;
+    return (
+      childEdits[key] || {
+        parentIds: person.parentIds || [],
+        guardianIds: person.guardianIds || [],
+        guardianshipDocId: person.guardianshipDocId || '',
+        delegateToHead: person.delegateToHead === true,
+      }
+    );
+  }
+
+  function setChildEdit(family: Family, person: FamilyPerson, patch: Partial<{
+    parentIds: string[];
+    guardianIds: string[];
+    guardianshipDocId: string;
+    delegateToHead: boolean;
+  }>) {
+    const key = `${family.id}::${person.name}`;
+    setChildEdits((prev) => ({
+      ...prev,
+      [key]: { ...childEditFor(family, person), ...patch },
+    }));
+  }
+
+  async function handleSaveChildDeciders(family: Family) {
+    const people = (family.people || []).map((person) => {
+      const key = `${family.id}::${person.name}`;
+      const edit = childEdits[key];
+      if (!edit) return person;
+      return {
+        ...person,
+        parentIds: edit.parentIds,
+        guardianIds: edit.guardianIds,
+        guardianshipDocId: edit.guardianshipDocId,
+        delegateToHead: edit.delegateToHead,
+      };
+    });
+    try {
+      await updateDoc(doc(db, 'families', family.id), {
+        people,
+        updatedAt: serverTimestamp(),
+      });
+      setChildFeedback(`Saved for the ${family.name} family.`);
+    } catch (err) {
+      setChildFeedback(
+        err instanceof Error
+          ? err.message
+          : 'The family record would not save — the family head keeps the roster.'
+      );
+    }
+  }
+
   function handleLoadOwnSheet() {
     const mine = ownEmergencySheets[0];
     if (!mine) {
@@ -3869,6 +3989,9 @@ function MainApp() {
     setSheetNotes(mine.notes || '');
     setSheetScope(mine.scope === 'private' || mine.scope === 'family' ? mine.scope : 'household');
     setSheetFamilyId(mine.familyId || '');
+    setSheetSubjectKey(
+      mine.subjectFamilyId && mine.subjectName ? `${mine.subjectFamilyId}::${mine.subjectName}` : ''
+    );
     setSheetFeedback('Your sheet is loaded below. Saving replaces it.');
   }
 
@@ -3879,8 +4002,18 @@ function MainApp() {
       setSheetFeedback('The sheet needs the name responders will know.');
       return;
     }
+    const subject = sheetSubjectKey
+      ? myDeciderChildren().find((c) => c.key === sheetSubjectKey)
+      : undefined;
     const memberIds = audienceFor(sheetScope, sheetFamilyId, [], activeHousehold?.householdId || '', 'documents');
     const payload: Record<string, unknown> = {
+      ...(subject
+        ? {
+            subjectName: subject.person.name,
+            subjectFamilyId: subject.family.id,
+            decidedByIds: childDeciderIds(subject.person),
+          }
+        : { subjectName: '', subjectFamilyId: '', decidedByIds: [] }),
       forName,
       contacts: sheetContacts.trim(),
       doctors: sheetDoctors.trim(),
@@ -3897,7 +4030,14 @@ function MainApp() {
       updatedAt: serverTimestamp(),
     };
     try {
-      const mine = ownEmergencySheets[0];
+      const mine = subject
+        ? emergencySheets.find(
+            (sh) =>
+              sh.subjectFamilyId === subject.family.id &&
+              sh.subjectName === subject.person.name &&
+              (sh.userId === user.uid || (sh.decidedByIds || []).includes(user.uid))
+          )
+        : ownEmergencySheets[0];
       if (mine) {
         await updateDoc(doc(db, 'emergencySheets', mine.id), payload);
         setSheetFeedback('Your emergency sheet is updated.');
@@ -4300,6 +4440,8 @@ function MainApp() {
         verifiedAtIso: '',
         paperLocation: (payload.paperLocation || '').slice(0, 200),
         accountLocation: (payload.accountLocation || '').slice(0, 200),
+        subjectName: (payload.subjectName || '').slice(0, 120),
+        subjectFamilyId: (payload.subjectFamilyId || '').slice(0, 128),
         recordKind: payload.recordKind || 'personal',
         customKindLabel:
           payload.recordKind === 'custom' ? (payload.customKindLabel || '').slice(0, 60) : '',
@@ -4327,6 +4469,9 @@ function MainApp() {
       if (updates.keyDetails !== undefined)
         clean.keyDetails = updates.keyDetails.slice(0, 25).map((k) => k.slice(0, 240));
       if (updates.detectedDate !== undefined) clean.detectedDate = updates.detectedDate.slice(0, 20);
+      if (updates.subjectName !== undefined) clean.subjectName = updates.subjectName.slice(0, 120);
+      if (updates.subjectFamilyId !== undefined)
+        clean.subjectFamilyId = updates.subjectFamilyId.slice(0, 128);
       if (updates.notes !== undefined) clean.notes = updates.notes.slice(0, 2000);
       if (updates.verificationStatus !== undefined)
         clean.verificationStatus = updates.verificationStatus;
@@ -4913,6 +5058,8 @@ function MainApp() {
         entryDate: payload.entryDate,
         vendor: (payload.vendor || '').slice(0, 120),
         accountLocation: (payload.accountLocation || '').slice(0, 200),
+        subjectName: (payload.subjectName || '').slice(0, 120),
+        subjectFamilyId: (payload.subjectFamilyId || '').slice(0, 128),
         place: (payload.place || '').slice(0, 60),
         careForJason: Boolean(payload.careForJason),
         taxDeductible: Boolean(payload.taxDeductible),
@@ -4949,6 +5096,9 @@ function MainApp() {
       if (updates.vendor !== undefined) clean.vendor = updates.vendor.slice(0, 120);
       if (updates.accountLocation !== undefined)
         clean.accountLocation = updates.accountLocation.slice(0, 200);
+      if (updates.subjectName !== undefined) clean.subjectName = updates.subjectName.slice(0, 120);
+      if (updates.subjectFamilyId !== undefined)
+        clean.subjectFamilyId = updates.subjectFamilyId.slice(0, 128);
       if (updates.place !== undefined) clean.place = updates.place.slice(0, 60);
       if (updates.careForJason !== undefined) clean.careForJason = Boolean(updates.careForJason);
       if (updates.taxDeductible !== undefined) clean.taxDeductible = Boolean(updates.taxDeductible);
@@ -5976,6 +6126,7 @@ function MainApp() {
             <FinancesView
               entries={displayFinanceEntries}
               documents={displayDocuments}
+              childSubjects={childSubjectOptions}
               onCreateEntry={handleCreateFinanceEntry}
               onUpdateEntry={handleUpdateFinanceEntry}
               onDeleteEntry={handleDeleteFinanceEntry}
@@ -5984,6 +6135,7 @@ function MainApp() {
 
           {activeTab === 'vault' && (
             <DocumentScannerVaultView
+              childSubjects={childSubjectOptions}
               documents={displayDocuments}
               onSaveDocument={handleSaveDocument}
               onUpdateDocument={handleUpdateDocument}
@@ -7225,6 +7377,27 @@ function MainApp() {
                 give medical advice, and it never changes a word.
               </p>
               <div className="space-y-2">
+                {myDeciderChildren().length > 0 && (
+                  <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                    <span>This sheet is for:</span>
+                    <select
+                      value={sheetSubjectKey}
+                      onChange={(e) => {
+                        setSheetSubjectKey(e.target.value);
+                        const picked = myDeciderChildren().find((c) => c.key === e.target.value);
+                        if (picked) setSheetForName(picked.person.name);
+                      }}
+                      className="min-h-[34px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                    >
+                      <option value="">Me</option>
+                      {myDeciderChildren().map((c) => (
+                        <option key={c.key} value={c.key}>
+                          {c.person.name} — my child
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <div className="flex flex-wrap gap-2">
                   <input
                     type="text"
@@ -7386,6 +7559,137 @@ function MainApp() {
                     </div>
                   ))}
                 </div>
+              )}
+            </div>
+
+            <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                Children & parents
+              </h3>
+              <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                For a child, the parents decide — not the head of the house, not the head
+                of the family. That covers the emergency sheet and any record about the
+                child, medical and financial included. Living in someone's house does
+                not hand them your children. A legal guardian stands in the parents'
+                place, with the judge's document filed on the desk as the proof. The
+                switch at the bottom of each child's row is the compromise, and it
+                belongs to the parents: leave it off and the parents decide alone; turn
+                it on and they share those decisions upward with the head.
+              </p>
+              {families.map((fam) => {
+                const minors = (fam.people || []).filter((person) => personIsMinor(fam, person));
+                if (minors.length === 0) return null;
+                const candidates = (fam.people || []).filter((person) => person.userId);
+                return (
+                  <div key={fam.id} className="space-y-2">
+                    <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                      {fam.name}
+                    </p>
+                    {minors.map((person) => {
+                      const edit = childEditFor(fam, person);
+                      const toggleIn = (
+                        list: string[],
+                        uid: string,
+                        field: 'parentIds' | 'guardianIds'
+                      ) => {
+                        const next = list.includes(uid)
+                          ? list.filter((x) => x !== uid)
+                          : [...list, uid];
+                        setChildEdit(fam, person, { [field]: next } as Partial<{
+                          parentIds: string[];
+                          guardianIds: string[];
+                        }>);
+                      };
+                      return (
+                        <div
+                          key={person.name}
+                          className="px-3 py-2 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 rounded-lg space-y-1.5"
+                        >
+                          <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                            {person.name}
+                          </p>
+                          <div className="flex flex-wrap gap-x-4 gap-y-1">
+                            <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                              Parents:
+                            </span>
+                            {candidates.map((cand) => (
+                              <label
+                                key={`p-${cand.userId}`}
+                                className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={edit.parentIds.includes(cand.userId || '')}
+                                  onChange={() => toggleIn(edit.parentIds, cand.userId || '', 'parentIds')}
+                                />
+                                {cand.name}
+                              </label>
+                            ))}
+                          </div>
+                          <div className="flex flex-wrap gap-x-4 gap-y-1">
+                            <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                              Legal guardians:
+                            </span>
+                            {candidates.map((cand) => (
+                              <label
+                                key={`g-${cand.userId}`}
+                                className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={edit.guardianIds.includes(cand.userId || '')}
+                                  onChange={() => toggleIn(edit.guardianIds, cand.userId || '', 'guardianIds')}
+                                />
+                                {cand.name}
+                              </label>
+                            ))}
+                          </div>
+                          <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                            <span>The judge's document:</span>
+                            <select
+                              value={edit.guardianshipDocId}
+                              onChange={(e) =>
+                                setChildEdit(fam, person, { guardianshipDocId: e.target.value })
+                              }
+                              className="min-h-[32px] px-2 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                            >
+                              <option value="">None filed</option>
+                              {documents.map((d) => (
+                                <option key={d.id} value={d.id}>
+                                  {d.title}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400">
+                            <input
+                              type="checkbox"
+                              checked={edit.delegateToHead}
+                              onChange={(e) =>
+                                setChildEdit(fam, person, { delegateToHead: e.target.checked })
+                              }
+                              className="mt-0.5"
+                            />
+                            <span>
+                              The parents share decisions for {person.name} upward with the
+                              head (the compromise — the parents' switch, nobody else's).
+                            </span>
+                          </label>
+                        </div>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveChildDeciders(fam)}
+                      className="min-h-[34px] px-3 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-md"
+                    >
+                      Save for the {fam.name} family
+                    </button>
+                  </div>
+                );
+              })}
+              {childFeedback && (
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">{childFeedback}</p>
               )}
             </div>
 

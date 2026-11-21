@@ -433,6 +433,12 @@ export interface ScannedDocument {
   scope?: 'private' | 'household' | 'family' | 'circles';
   familyId?: string;
   circleIds?: string[];
+  // About a child (Jason, 2026-11-21): when a record is about a
+  // child, the roster names the child here, and the child's
+  // parents decide for it — a head's circle omissions cannot
+  // hide a child's record from the child's own parents.
+  subjectName?: string;
+  subjectFamilyId?: string;
   // The record kind (Jason, 2026-11-21): how this paper is filed —
   // Financial, Medical, Personal, or the family's own Custom kind
   // (named in customKindLabel). Absent means Personal.
@@ -846,6 +852,13 @@ export interface EmergencySheet {
   scope?: 'private' | 'household' | 'family';
   familyId?: string;
   circleIds?: string[];
+  // When the sheet is about a child, the roster names the child
+  // (subjectName within subjectFamilyId) and decidedByIds holds
+  // the parents and guardians who make the calls for it — the
+  // sheet's reach is their decision, not the head's.
+  subjectName?: string;
+  subjectFamilyId?: string;
+  decidedByIds?: string[];
   // The sheet is the person's own words, held by the desk for
   // the day somebody needs it fast: who to call, who their
   // doctors are, what responders should know. The desk holds the
@@ -970,6 +983,47 @@ export interface FamilyPerson {
   // by seniority (Mom in Derek's circle; Derek still heads his own).
   blood?: boolean;
   courtesy?: boolean;
+  // Parental authority (Jason, 2026-11-21): for a child, the
+  // deciders are the child's direct parents — not the household
+  // head, not the family head. parentIds and guardianIds hold
+  // the deciders' user ids. A legal guardian stands in the
+  // parents' place, proven by a judge's document filed on the
+  // desk (guardianshipDocId points at it). delegateToHead is the
+  // parents' own switch — the compromise: off (the default) the
+  // parents decide alone; on, they share the decisions upward
+  // with the head. Nobody else can flip it for them.
+  parentIds?: string[];
+  guardianIds?: string[];
+  guardianshipDocId?: string;
+  delegateToHead?: boolean;
+}
+
+// Everyone who decides for this person: their parents first,
+// and any legal guardians standing in the parents' place.
+export function childDeciderIds(person: FamilyPerson): string[] {
+  return [...(person.parentIds || []), ...(person.guardianIds || [])];
+}
+
+// A child for the parental-authority law: under the family's
+// responsible age (their own override when set), and not placed
+// in the stream by a responsibility standing of 'yes'. No birth
+// record, no minority the desk can claim.
+export function personIsMinor(family: Family, person: FamilyPerson): boolean {
+  if (person.responsibility === 'yes') return false;
+  const age = person.responsibleAge || familyResponsibleAge(family);
+  const now = new Date();
+  if (person.birthDate) {
+    const born = new Date(`${person.birthDate}T12:00:00`);
+    if (isNaN(born.getTime())) return false;
+    let years = now.getFullYear() - born.getFullYear();
+    const m = now.getMonth() - born.getMonth();
+    if (m < 0 || (m === 0 && now.getDate() < born.getDate())) years -= 1;
+    return years < age;
+  }
+  if (typeof person.birthYear === 'number') {
+    return now.getFullYear() - person.birthYear < age;
+  }
+  return false;
 }
 
 // The head of a family, derived — never appointed by a button: the
@@ -1264,6 +1318,12 @@ export interface FinanceEntry {
   scope?: 'private' | 'household' | 'family' | 'circles';
   familyId?: string;
   circleIds?: string[];
+  // About a child (Jason, 2026-11-21): when a record is about a
+  // child, the roster names the child here, and the child's
+  // parents decide for it — a head's circle omissions cannot
+  // hide a child's record from the child's own parents.
+  subjectName?: string;
+  subjectFamilyId?: string;
   kind: FinanceKind;
   group: string;
   title: string;

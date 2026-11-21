@@ -26,6 +26,12 @@ import {
 } from '../types';
 
 interface FinancesViewProps {
+  childSubjects?: Array<{
+    key: string;
+    label: string;
+    subjectName: string;
+    subjectFamilyId: string;
+  }>;
   entries: FinanceEntry[];
   documents: ScannedDocument[];
   onCreateEntry: (
@@ -88,6 +94,7 @@ function extractAmountFromDoc(doc: ScannedDocument): number | null {
 }
 
 export const FinancesView: React.FC<FinancesViewProps> = ({
+  childSubjects,
   entries,
   documents,
   onCreateEntry,
@@ -119,6 +126,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   const [notes, setNotes] = useState('');
   const [linkedDocumentId, setLinkedDocumentId] = useState('');
   const [accountLocation, setAccountLocation] = useState('');
+  const [subjectKey, setSubjectKey] = useState('');
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
 
@@ -277,6 +285,11 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     setNotes(entry.notes);
     setLinkedDocumentId(entry.linkedDocumentId);
     setAccountLocation(entry.accountLocation || '');
+    setSubjectKey(
+      entry.subjectName && entry.subjectFamilyId
+        ? `${entry.subjectFamilyId}::${entry.subjectName}`
+        : ''
+    );
     setModalOpen(true);
   }
 
@@ -323,6 +336,10 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         notes: notes.trim().slice(0, 2000),
         linkedDocumentId: linkedDocumentId || '',
         accountLocation: accountLocation.trim().slice(0, 200),
+        subjectName:
+          (childSubjects || []).find((c) => c.key === subjectKey)?.subjectName || '',
+        subjectFamilyId:
+          (childSubjects || []).find((c) => c.key === subjectKey)?.subjectFamilyId || '',
       };
 
       if (editingEntry) {
@@ -1027,6 +1044,24 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                 placeholder="Bank or office, and its address — where the account itself is held"
                 className="w-full min-h-[42px] px-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
               />
+
+              {(childSubjects || []).length > 0 && (
+                <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                  <span>About a child:</span>
+                  <select
+                    value={subjectKey}
+                    onChange={(e) => setSubjectKey(e.target.value)}
+                    className="min-h-[38px] px-2 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                  >
+                    <option value="">Not about a child</option>
+                    {(childSubjects || []).map((c) => (
+                      <option key={c.key} value={c.key}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
 
             <label className="flex items-center gap-2.5 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer pt-1">

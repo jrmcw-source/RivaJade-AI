@@ -37,6 +37,12 @@ interface SuggestedTaskFromOCR {
 }
 
 interface DocumentScannerVaultViewProps {
+  childSubjects?: Array<{
+    key: string;
+    label: string;
+    subjectName: string;
+    subjectFamilyId: string;
+  }>;
   documents: ScannedDocument[];
   onSaveDocument: (
     payload: Omit<ScannedDocument, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'householdId' | 'memberIds' | 'verificationStatus' | 'verifiedByName' | 'verifiedAtIso' | 'paperLocation' | 'driveFileId'> & { paperLocation?: string }
@@ -86,6 +92,7 @@ function extractSnippet(text: string, query: string, radius = 90): string {
 }
 
 export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> = ({
+  childSubjects,
   documents,
   onSaveDocument,
   onUpdateDocument,
@@ -154,6 +161,7 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
   // Inspector edit state
   const [editTagInput, setEditTagInput] = useState('');
   const [paperLocationInput, setPaperLocationInput] = useState('');
+  const [subjectInput, setSubjectInput] = useState('');
   const [accountLocationInput, setAccountLocationInput] = useState('');
   const [placeInput, setPlaceInput] = useState('');
   const [kindInput, setKindInput] = useState<RecordKind>('personal');
@@ -456,6 +464,11 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
     setAccountLocationInput(selectedDoc?.accountLocation || '');
     setPlaceInput(selectedDoc?.place || '');
     setKindInput(selectedDoc?.recordKind || 'personal');
+    setSubjectInput(
+      selectedDoc?.subjectName && selectedDoc?.subjectFamilyId
+        ? `${selectedDoc.subjectFamilyId}::${selectedDoc.subjectName}`
+        : ''
+    );
     setCustomKindInput(selectedDoc?.customKindLabel || '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDocId]);
@@ -791,10 +804,35 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
                   className="w-full min-h-[40px] px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
                 />
               )}
+              {(childSubjects || []).length > 0 && (
+                <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                  <span>About a child:</span>
+                  <select
+                    value={subjectInput}
+                    onChange={(e) => setSubjectInput(e.target.value)}
+                    className="min-h-[36px] px-2 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
+                  >
+                    <option value="">Not about a child</option>
+                    {(childSubjects || []).map((c) => (
+                      <option key={c.key} value={c.key}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-[11px] text-slate-400">
+                    The child's parents decide for records about them.
+                  </span>
+                </label>
+              )}
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
                   void onUpdateDocument(selectedDoc.id, {
+                    subjectName:
+                      (childSubjects || []).find((c) => c.key === subjectInput)?.subjectName || '',
+                    subjectFamilyId:
+                      (childSubjects || []).find((c) => c.key === subjectInput)?.subjectFamilyId ||
+                      '',
                     paperLocation: paperLocationInput.trim(),
                     accountLocation: accountLocationInput.trim(),
                     place: placeInput,
