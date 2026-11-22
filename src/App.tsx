@@ -123,6 +123,8 @@ import { FinancesView } from './components/FinancesView';
 import { GoogleDriveBackupModal } from './components/GoogleDriveBackupModal';
 import { AIAssistantDrawer } from './components/AIAssistantDrawer';
 import { AboutView } from './components/AboutView';
+import SetupWizardView from './components/SetupWizardView';
+import { connectGoogleDrive } from './firebase';
 import { FrontDoorView, FrontDoorDeskId } from './components/FrontDoorView';
 import { TreeView } from './components/TreeView';
 import {
@@ -335,6 +337,8 @@ function MainApp() {
   const [scannerTriggerCount, setScannerTriggerCount] = useState(0);
   const [dismissedReminders, setDismissedReminders] = useState<Record<string, boolean>>({});
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const wizardFamilyRef = useRef<{ id: string; name: string } | null>(null);
   const [driveBackupOpen, setDriveBackupOpen] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [driveConnected, setDriveConnected] = useState(false);
@@ -2378,6 +2382,8 @@ function MainApp() {
     aiConnectors?: boolean;
     aiWrite?: boolean;
     sealedKinds?: RecordKind[];
+    displayName?: string;
+    setupDone?: boolean;
   }) {
     if (!user) return;
     try {
@@ -3505,6 +3511,86 @@ function MainApp() {
     }
   }
 
+  // The setup wizard's own creators (2026-11-21): the same writes
+  // as the Settings forms, driven by the wizard's steps instead.
+  async function wizardCreateFamily(name: string): Promise<boolean> {
+    if (!user || !userProfile) return false;
+    const trimmed = name.trim().slice(0, 120);
+    if (!trimmed) return false;
+    try {
+      const ref = await addDoc(collection(db, 'families'), {
+        name: trimmed,
+        ownerId: user.uid,
+        ownerName: userProfile.displayName || user.displayName || 'Steward User',
+        memberIds: [user.uid],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      wizardFamilyRef.current = { id: ref.id, name: trimmed };
+      return true;
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'families');
+      return false;
+    }
+  }
+
+  async function wizardCreateHousehold(name: string): Promise<boolean> {
+    if (!user) return false;
+    const trimmed = name.trim().slice(0, 120);
+    if (!trimmed) return false;
+    const householdId = createSafeId('hh');
+    const displayName = userProfile?.displayName || user.displayName || 'Household Owner';
+    const username = userProfile?.username || sanitizeHandle('owner', user.uid);
+    try {
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'households', householdId), {
+        householdId,
+        name: trimmed,
+        ownerId: user.uid,
+        ownerName: displayName.slice(0, 120),
+        memberIds: [user.uid],
+        invitedEmails: [],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      batch.set(doc(db, 'households', householdId, 'members', user.uid), {
+        userId: user.uid,
+        householdId,
+        householdOwnerId: user.uid,
+        displayName: displayName.slice(0, 120),
+        username,
+        role: 'owner',
+        memberIds: [user.uid],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      await batch.commit();
+      const fam = wizardFamilyRef.current;
+      if (fam) {
+        const famObj = {
+          id: fam.id,
+          name: fam.name,
+          ownerId: user.uid,
+          memberIds: [user.uid],
+          people: [],
+        } as unknown as Family;
+        await updateDoc(doc(db, 'families', fam.id), {
+          ...streamFieldsFor(famObj, [], [user.uid]),
+          updatedAt: serverTimestamp(),
+        });
+        await updateDoc(doc(db, 'households', householdId), {
+          familyId: fam.id,
+          updatedAt: serverTimestamp(),
+        });
+      }
+      switchHousehold(householdId);
+      return true;
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `households/${householdId}`);
+      return false;
+    }
+  }
+
   // The family's stream lists, figured from a candidate roster and
   // membership — written alongside every change that could move a
   // person's standing, so the rules mirror against fresh lists.
@@ -4471,6 +4557,16 @@ function MainApp() {
   const eulaNeeded = Boolean(
     user && userProfile && userProfile.eulaVersion !== EULA_VERSION
   );
+  // The setup wizard (2026-11-21): opens on its own for a brand-new
+  // desk (no family yet, wizard never finished), or any time from
+  // Settings. The front door waits behind it, like behind the gate.
+  const wizardNeeded = Boolean(
+    userProfile &&
+      !eulaNeeded &&
+      userProfile.setupDone !== true &&
+      families.length === 0
+  );
+  const wizardActive = !eulaNeeded && (wizardOpen || wizardNeeded);
 
   async function handleAcceptEula() {
     if (!db || !user) return;
@@ -8290,6 +8386,16 @@ function MainApp() {
               >
                 Read the About page
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSettingsOpen(false);
+                  setWizardOpen(true);
+                }}
+                className="min-h-[36px] px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-md text-slate-700 dark:text-slate-200 ml-2"
+              >
+                Run the setup wizard
+              </button>
             </div>
 
             <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
@@ -10050,7 +10156,7 @@ function MainApp() {
       )}
 
       <AIAssistantDrawer
-        open={assistantOpen && !eulaNeeded}
+        open={assistantOpen && !eulaNeeded && !wizardActive}
         onClose={() => setAssistantOpen(false)}
         userName={userProfile?.displayName || user.displayName || 'User'}
         tasks={visibleTasks}
@@ -10071,7 +10177,7 @@ function MainApp() {
       />
 
       {/* The Front Door — the big simple screen (2026-11-20) */}
-      {frontDoorOpen && !eulaNeeded && (
+      {frontDoorOpen && !eulaNeeded && !wizardActive && (
         <FrontDoorView
           userName={userProfile?.displayName || user.displayName || 'User'}
           addressName={userProfile?.addressName || ''}
@@ -10108,6 +10214,36 @@ function MainApp() {
           onRequestCircleBriefing={handleEnsureCircleBriefing}
           onSaveMemory={handleSaveVoiceMemory}
           onRecordBehaviorSignal={handleRecordBehaviorSignal}
+        />
+      )}
+
+      {wizardActive && userProfile && (
+        <SetupWizardView
+          initialDisplayName={userProfile.displayName || user?.displayName || ''}
+          initialAddressName={userProfile.addressName || ''}
+          existingFamilyName={families[0]?.name || null}
+          driveConnected={driveConnected}
+          aiAccess={userProfile.aiAccess !== false}
+          aiConnectors={userProfile.aiConnectors !== false}
+          aiWrite={userProfile.aiWrite === true}
+          onSaveName={async (dn, an) => {
+            await handleUpdateDeskPrefs({
+              ...(dn ? { displayName: dn } : {}),
+              addressName: an,
+            });
+          }}
+          onCreateFamily={wizardCreateFamily}
+          onCreateHousehold={wizardCreateHousehold}
+          onConnectDrive={async () => {
+            await connectGoogleDrive();
+          }}
+          onSaveAiPrefs={async (patch) => {
+            await handleUpdateDeskPrefs(patch);
+          }}
+          onFinish={() => {
+            setWizardOpen(false);
+            void handleUpdateDeskPrefs({ setupDone: true });
+          }}
         />
       )}
 

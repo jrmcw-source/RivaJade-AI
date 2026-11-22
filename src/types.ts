@@ -381,6 +381,9 @@ export interface UserProfile {
   // the About page — not repeated across the desk.
   eulaVersion?: string;
   eulaAcceptedAtIso?: string;
+  // The setup wizard (2026-11-21): set when the guided first run
+  // has been finished or skipped, so it opens once, not every time.
+  setupDone?: boolean;
   sealedKinds?: RecordKind[];
   createdAt?: unknown;
   updatedAt?: unknown;

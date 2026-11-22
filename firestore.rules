@@ -266,6 +266,7 @@ service cloud.firestore {
           'sealedKinds',
           'eulaVersion',
           'eulaAcceptedAtIso',
+          'setupDone',
           'createdAt',
           'updatedAt'
         ])
@@ -308,6 +309,7 @@ service cloud.firestore {
         && (!('aiWrite' in data) || data.aiWrite is bool)
         && (!('eulaVersion' in data) || (data.eulaVersion is string && data.eulaVersion.size() <= 40))
         && (!('eulaAcceptedAtIso' in data) || (data.eulaAcceptedAtIso is string && data.eulaAcceptedAtIso.size() <= 40))
+        && (!('setupDone' in data) || data.setupDone is bool)
         && (!('sealedKinds' in data) || isBoundedStringList(data.sealedKinds, 6, 20));
     }
 
