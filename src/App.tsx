@@ -9998,14 +9998,6 @@ function MainApp() {
       {aboutOpen && (
         <AboutView mode="about" onClose={() => setAboutOpen(false)} />
       )}
-      {eulaNeeded && (
-        <AboutView
-          mode="eula"
-          onClose={() => undefined}
-          onAccept={() => void handleAcceptEula()}
-          onDecline={() => void signOutUser()}
-        />
-      )}
 
       {printJob && (
         <div className="steward-print">
@@ -10058,7 +10050,7 @@ function MainApp() {
       )}
 
       <AIAssistantDrawer
-        open={assistantOpen}
+        open={assistantOpen && !eulaNeeded}
         onClose={() => setAssistantOpen(false)}
         userName={userProfile?.displayName || user.displayName || 'User'}
         tasks={visibleTasks}
@@ -10079,7 +10071,7 @@ function MainApp() {
       />
 
       {/* The Front Door — the big simple screen (2026-11-20) */}
-      {frontDoorOpen && (
+      {frontDoorOpen && !eulaNeeded && (
         <FrontDoorView
           userName={userProfile?.displayName || user.displayName || 'User'}
           addressName={userProfile?.addressName || ''}
@@ -10116,6 +10108,15 @@ function MainApp() {
           onRequestCircleBriefing={handleEnsureCircleBriefing}
           onSaveMemory={handleSaveVoiceMemory}
           onRecordBehaviorSignal={handleRecordBehaviorSignal}
+        />
+      )}
+
+      {eulaNeeded && (
+        <AboutView
+          mode="eula"
+          onClose={() => undefined}
+          onAccept={() => void handleAcceptEula()}
+          onDecline={() => void signOutUser()}
         />
       )}
 

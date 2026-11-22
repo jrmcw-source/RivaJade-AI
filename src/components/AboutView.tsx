@@ -14,7 +14,11 @@ interface AboutViewProps {
 // Not repeated on cards, not printed on handouts.
 export const AboutView: React.FC<AboutViewProps> = ({ mode, onClose, onAccept, onDecline }) => {
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-white dark:bg-slate-950">
+    <div
+      className={`fixed inset-0 overflow-y-auto bg-white dark:bg-slate-950 ${
+        mode === 'eula' ? 'z-[80]' : 'z-50'
+      }`}
+    >
       <div className="max-w-2xl mx-auto px-5 py-8 space-y-6">
         <div className="flex items-start justify-between gap-4">
           <div>
