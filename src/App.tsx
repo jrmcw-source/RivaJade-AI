@@ -116,7 +116,6 @@ import { WelcomeSignInView } from './components/WelcomeSignInView';
 import { ScheduleAndCalendarView } from './components/ScheduleAndCalendarView';
 import { DocumentScannerVaultView } from './components/DocumentScannerVaultView';
 import { CollaborativeProjectsView } from './components/CollaborativeProjectsView';
-import { GeminiLiveVoiceView } from './components/GeminiLiveVoiceView';
 import { AnalyticsDashboardView } from './components/AnalyticsDashboardView';
 import { WimberleyPropertyView } from './components/WimberleyPropertyView';
 import { FinancesView } from './components/FinancesView';
@@ -189,7 +188,6 @@ type NavTab =
   | 'finances'
   | 'vault'
   | 'projects'
-  | 'voice'
 
 function sanitizeHandle(raw: string, fallbackUid: string): string {
   const cleaned = raw
@@ -5510,24 +5508,13 @@ function MainApp() {
     return match.title;
   }
 
-  // Browsing is its own request: the calendar comes forward and the
-  // short version is read aloud from here, because the front door has
-  // stepped aside by the time the words are spoken.
+  // Browsing is its own request: the calendar comes forward. The family
+  // build is text-only (Jason, 2026-11-23) — the summary is on the
+  // calendar screen itself; nothing is read aloud.
   function handleShowCalendar(summary: string) {
+    void summary;
     setActiveTab('schedule');
     setFrontDoorOpen(false);
-    if (userProfile?.voiceMuted) return;
-    try {
-      if (!('speechSynthesis' in window)) return;
-      const clean = summary.replace(/[*#`_>]/g, '').replace(/\s+/g, ' ').trim();
-      if (!clean) return;
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(clean.slice(0, 600));
-      utterance.rate = 1;
-      window.speechSynthesis.speak(utterance);
-    } catch {
-      // Speech is a courtesy layer; the calendar is already on screen.
-    }
   }
 
   async function handleSaveVoiceMemory(payload: {
@@ -6338,11 +6325,10 @@ function MainApp() {
       icon: <Users className="w-4 h-4" />,
       badge: unreadAlertsCount > 0 ? unreadAlertsCount : undefined,
     },
-    { id: 'voice', label: 'Voice Live', mobileLabel: 'Voice', icon: <Mic className="w-4 h-4" /> },
   ];
 
   const mobileBottomItems = navItems.filter((item) =>
-    ['frontdoor', 'schedule', 'property', 'finances', 'vault', 'voice'].includes(item.id)
+    ['frontdoor', 'schedule', 'property', 'finances', 'vault'].includes(item.id)
   );
 
   return (
@@ -6850,20 +6836,6 @@ function MainApp() {
               {addressNameFeedback && (
                 <p className="text-xs text-teal-700 dark:text-teal-400">{addressNameFeedback}</p>
               )}
-              <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400 pt-1">
-                <input
-                  type="checkbox"
-                  checked={Boolean(userProfile?.voiceMuted)}
-                  onChange={(e) =>
-                    void handleUpdateDeskPrefs({ voiceMuted: e.target.checked })
-                  }
-                  className="mt-0.5"
-                />
-                <span>
-                  Keep the front door's spoken voice muted. It stays muted — in church, say —
-                  until it is turned back on here or on the front door itself.
-                </span>
-              </label>
               <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400 pt-1">
                 <input
                   type="checkbox"

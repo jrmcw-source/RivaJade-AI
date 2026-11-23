@@ -154,7 +154,6 @@ const VALID_NAV_TABS: readonly AssistantNavTarget[] = [
   'finances',
   'vault',
   'projects',
-  'voice',
 ];
 
 const VALID_PROPERTY_AREAS: readonly PropertyEntryArea[] = [
@@ -436,33 +435,11 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
 
   // -- Spoken output ---------------------------------------------------------
   function speak(text: string) {
-    if (mutedRef.current) {
-      maybeRestartListening();
-      return;
-    }
-    if (!('speechSynthesis' in window)) {
-      maybeRestartListening();
-      return;
-    }
-    const clean = text.replace(/[*#`_>]/g, '').replace(/\s+/g, ' ').trim();
-    if (!clean) return;
-    try {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(clean.slice(0, 600));
-      utterance.rate = 1;
-      speakingRef.current = true;
-      utterance.onend = () => {
-        speakingRef.current = false;
-        maybeRestartListening();
-      };
-      utterance.onerror = () => {
-        speakingRef.current = false;
-        maybeRestartListening();
-      };
-      window.speechSynthesis.speak(utterance);
-    } catch {
-      speakingRef.current = false;
-    }
+    // The family build is text-only (Jason, 2026-11-23): the desk never
+    // speaks. Answers land on the screen as text; this keeps the call
+    // sites working and the listening cycle turning, silently.
+    void text;
+    maybeRestartListening();
   }
 
   // -- Speech recognition input (the desks' ear) ------------------------------
@@ -1440,7 +1417,7 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
         type="text"
         value={input}
         onChange={(e) => setInput(e.target.value)}
-        placeholder="Type here, or just talk…"
+        placeholder="Type here…"
         className="flex-1 min-h-[56px] px-4 text-lg bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-2xl text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:border-teal-600"
       />
       <button
@@ -1454,24 +1431,6 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
     </form>
   );
 
-  const muteButton = (
-    <button
-      type="button"
-      onClick={() => {
-        bumpActivity();
-        onToggleMuted();
-      }}
-      aria-label={voiceMuted ? 'Turn the voice back on' : 'Mute the voice'}
-      className={`min-h-[64px] inline-flex items-center justify-center gap-3 px-5 text-xl font-semibold rounded-2xl border transition-colors ${
-        voiceMuted
-          ? 'bg-amber-100 dark:bg-amber-950/50 border-amber-400 dark:border-amber-700 text-amber-900 dark:text-amber-200'
-          : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-100'
-      }`}
-    >
-      {voiceMuted ? <VolumeX className="w-7 h-7" /> : <Volume2 className="w-7 h-7" />}
-      <span>{voiceMuted ? 'Voice is off' : 'Mute'}</span>
-    </button>
-  );
 
   const closeButton = (
     <button
@@ -1538,7 +1497,6 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
         </div>
 
         <div className="p-4 grid grid-cols-2 gap-3 max-w-xl w-full mx-auto">
-          {muteButton}
           {closeButton}
         </div>
       </div>
@@ -1560,17 +1518,6 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => {
-              bumpActivity();
-              onToggleMuted();
-            }}
-            aria-label={voiceMuted ? 'Turn the voice back on' : 'Mute the voice'}
-            className="min-h-[48px] min-w-[48px] inline-flex items-center justify-center rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200"
-          >
-            {voiceMuted ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
-          </button>
           <button
             type="button"
             onClick={handleClose}

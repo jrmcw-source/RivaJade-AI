@@ -38,8 +38,7 @@ export type AssistantNavTarget =
   | 'property'
   | 'finances'
   | 'vault'
-  | 'projects'
-  | 'voice';
+  | 'projects';
 
 interface SuggestedAction {
   type:
@@ -111,7 +110,6 @@ const VALID_NAV_TABS: readonly AssistantNavTarget[] = [
   'finances',
   'vault',
   'projects',
-  'voice',
 ];
 
 const VALID_PROPERTY_AREAS: readonly PropertyEntryArea[] = [
