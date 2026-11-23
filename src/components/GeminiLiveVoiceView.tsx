@@ -677,7 +677,7 @@ export const GeminiLiveVoiceView: React.FC<GeminiLiveVoiceViewProps> = ({
                 >
                   {turn.speaker !== 'system' && (
                     <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
-                      {turn.speaker === 'user' ? userName : 'Steward'}
+                      {turn.speaker === 'user' ? userName : 'GiniApp'}
                     </p>
                   )}
                   <p className="leading-relaxed">{turn.text}</p>
@@ -751,7 +751,7 @@ export const GeminiLiveVoiceView: React.FC<GeminiLiveVoiceViewProps> = ({
 
             {memories.length === 0 ? (
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Ask Steward during a voice call to save follow-up steps, or click &ldquo;Save Session Memory&rdquo; after chatting.
+                Ask GiniApp during a voice call to save follow-up steps, or click &ldquo;Save Session Memory&rdquo; after chatting.
               </p>
             ) : (
               <div className="space-y-3 max-h-[340px] overflow-y-auto pr-1">

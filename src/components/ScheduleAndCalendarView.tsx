@@ -521,7 +521,7 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
         <div className="flex items-center gap-2 self-start sm:self-auto">
           <button
             type="button"
-            onClick={() => downloadIcsCalendar(tasks, 'Steward Household Calendar')}
+            onClick={() => downloadIcsCalendar(tasks, 'GiniApp Family Calendar')}
             title="Download a calendar file (.ics) of open tasks and appointments — import it into Apple Calendar, Google Calendar, or Outlook"
             className="min-h-[40px] inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg transition-colors whitespace-nowrap shrink-0"
           >
@@ -1248,7 +1248,7 @@ export const ScheduleAndCalendarView: React.FC<ScheduleAndCalendarViewProps> = (
                 Ready to rank your schedule
               </p>
               <p className="text-sm text-slate-500 dark:text-slate-400 max-w-lg mx-auto">
-                Click &ldquo;Generate Today&apos;s Priority Plan&rdquo; above. As you boost, defer, and complete tasks, Steward records your preferences ({userProfile?.behaviorSignals.length || 0} learned behavioral signals stored) and tailors future rankings automatically.
+                Click &ldquo;Generate Today&apos;s Priority Plan&rdquo; above. As you boost, defer, and complete tasks, the desk records your preferences ({userProfile?.behaviorSignals.length || 0} learned behavioral signals stored) and tailors future rankings automatically.
               </p>
             </div>
           )}

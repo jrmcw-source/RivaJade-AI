@@ -29,7 +29,7 @@ export const WelcomeSignInView: React.FC<WelcomeSignInViewProps> = ({
       <header className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between gap-8">
           <span className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-100 whitespace-nowrap shrink-0 font-display">
-            Steward
+            GiniApp
           </span>
 
           <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600 dark:text-slate-300">
@@ -106,7 +106,7 @@ export const WelcomeSignInView: React.FC<WelcomeSignInViewProps> = ({
                 <div className="w-full h-full flex flex-col items-center justify-center p-10 text-center space-y-3 bg-gradient-to-br from-slate-100 to-teal-50 dark:from-slate-900 dark:to-teal-950/40">
                   <Calendar className="w-10 h-10 text-teal-700 dark:text-teal-400" />
                   <p className="text-base font-semibold text-slate-900 dark:text-slate-100">
-                    Steward Household & Schedule Hub
+                    The family desk
                   </p>
                 </div>
               )}

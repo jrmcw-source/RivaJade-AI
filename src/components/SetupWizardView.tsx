@@ -258,7 +258,7 @@ export default function SetupWizardView(props: SetupWizardViewProps) {
               Safety copies
             </h1>
             <p className="text-lg text-slate-600 dark:text-slate-300 leading-relaxed">
-              Steward can keep a safety copy of the whole desk in your own
+              GiniApp can keep a safety copy of the whole desk in your own
               Google Drive — your files, in your Drive; the desk just puts
               them there. Connect now, or later from the Drive Backup button
               at the top of the desk.

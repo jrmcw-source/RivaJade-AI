@@ -547,7 +547,7 @@ export const DocumentScannerVaultView: React.FC<DocumentScannerVaultViewProps> =
             </p>
           )}
           <p style={{ fontSize: '12px', marginTop: '16px' }}>
-            Kept by the family in Steward.
+            Kept by the family in GiniApp.
           </p>
         </div>
       )}

@@ -38,7 +38,7 @@ export const PWAInstallModalTrigger: React.FC<{ compact?: boolean }> = ({ compac
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
-                  Install Steward on iOS & Android
+                  Install GiniApp on iOS & Android
                 </h3>
                 <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
                   Run as a standalone home-screen app with offline access, camera scanning, and cloud sync.
@@ -99,7 +99,7 @@ export const PWAInstallModalTrigger: React.FC<{ compact?: boolean }> = ({ compac
                       2. Tap Add to Home Screen
                     </p>
                     <p className="text-slate-600 dark:text-slate-400 mt-0.5">
-                      Scroll down and select &ldquo;Add to Home Screen&rdquo;, then tap Add to launch Steward full-screen.
+                      Scroll down and select &ldquo;Add to Home Screen&rdquo;, then tap Add to launch GiniApp full-screen.
                     </p>
                   </div>
                 </div>

@@ -500,7 +500,7 @@ ${PLACE_TREE_BRIEF}`,
       });
       const ics = buildIcsCalendar(
         feedTasks as unknown as ScheduleTask[],
-        hh.name ? `${hh.name} — Steward` : 'Steward Household Calendar'
+        hh.name ? `${hh.name} — GiniApp` : 'GiniApp Family Calendar'
       );
       res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache');
@@ -1282,7 +1282,7 @@ Answer with the desk id only.`;
         model: DESK_MODEL,
         contents: isMail
           ? `Current Date/Time: ${ctx.currentDateTime || new Date().toISOString()}
-Reader: ${ctx.userName || 'Steward User'}${ctx.addressName ? `\nAddress them as: ${ctx.addressName}` : ''}
+Reader: ${ctx.userName || 'GiniApp User'}${ctx.addressName ? `\nAddress them as: ${ctx.addressName}` : ''}
 
 THE READER'S OWN RECENT MAIL LINES:
 ${mailSummary}
@@ -1290,14 +1290,14 @@ ${mailSummary}
 Write the mail add-on now, following your brief exactly.`
           : isCircles
             ? `Current Date/Time: ${ctx.currentDateTime || new Date().toISOString()}
-Reader: ${ctx.userName || 'Steward User'}${ctx.addressName ? `\nAddress them as: ${ctx.addressName}` : ''}
+Reader: ${ctx.userName || 'GiniApp User'}${ctx.addressName ? `\nAddress them as: ${ctx.addressName}` : ''}
 
 WHAT THE READER'S FAMILY AND CIRCLES HOLD:
 ${circleSummary}
 
 Write the circle add-on now, following your brief exactly.`
             : `Current Date/Time: ${ctx.currentDateTime || new Date().toISOString()}
-Reader: ${ctx.userName || 'Steward User'}${ctx.addressName ? `\nAddress them as: ${ctx.addressName}` : ''}
+Reader: ${ctx.userName || 'GiniApp User'}${ctx.addressName ? `\nAddress them as: ${ctx.addressName}` : ''}
 
 THE HOUSEHOLD'S RECORDS FOR THE BRIEFING:
 ${summary}
@@ -1306,12 +1306,12 @@ Write the morning briefing now, following your brief exactly.`,
         config: {
           thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           systemInstruction: isMail
-            ? 'You are Steward, the household desk. You write one reader\'s personal mail add-on from the mail lines you are given, and nothing else.' +
+            ? 'You are GiniApp, the family desk. You write one reader\'s personal mail add-on from the mail lines you are given, and nothing else.' +
               MAIL_BRIEF
             : isCircles
-              ? 'You are Steward, the household desk. You write one reader\'s personal circle add-on from the family and circle records you are given, and nothing else.' +
+              ? 'You are GiniApp, the family desk. You write one reader\'s personal circle add-on from the family and circle records you are given, and nothing else.' +
                 CIRCLES_BRIEF
-              : 'You are Steward, the household desk. You write the morning briefing from the household records you are given, and nothing else.' +
+              : 'You are GiniApp, the family desk. You write the morning briefing from the household records you are given, and nothing else.' +
                 PLACE_TREE_BRIEF +
                 BRIEFING_BRIEF,
           responseMimeType: 'application/json',
@@ -1439,7 +1439,7 @@ Write the morning briefing now, following your brief exactly.`,
       const requestPayload = {
         model: DESK_MODEL,
         contents: `Current Date/Time: ${ctx.currentDateTime || new Date().toISOString()}
-User: ${ctx.userName || 'Steward User'}${ctx.addressName ? `\nAddress them as: ${ctx.addressName}` : ''}
+User: ${ctx.userName || 'GiniApp User'}${ctx.addressName ? `\nAddress them as: ${ctx.addressName}` : ''}
 Google Drive Backup Status: ${ctx.driveConnected ? 'Connected in current session' : 'Not yet connected in this session (user can connect via Google Drive Backups)'}${ctx.aiWrite === true ? '' : '\nAuthority: the account holder has NOT given you write authority. Read and suggest only — never say you changed, saved, filed, or sent anything. Put any change you propose in plain words for the person to make themselves.'}
 
 LIVE WORKSPACE SNAPSHOT:
@@ -1467,7 +1467,7 @@ ${actionDocs}`,
         config: {
           thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           systemInstruction:
-            'You are Steward AI Assistant, a knowledgeable, concise, practical household, Texas Hill Country property, and personal finance assistant. Ground every answer in the user workspace data provided. Never invent fake totals or documents. Use plain, helpful prose and only include suggestedActions when genuinely actionable.' +
+            'You are GiniApp, a knowledgeable, concise, practical household, Texas Hill Country property, and personal finance assistant. Ground every answer in the user workspace data provided. Never invent fake totals or documents. Use plain, helpful prose and only include suggestedActions when genuinely actionable.' +
             PLACE_TREE_BRIEF +
             SUPERVISOR_RULES +
             desk.brief +
@@ -1552,7 +1552,7 @@ ${actionDocs}`,
     } catch (error) {
       console.error('AI Assistant chat error:', error);
       let readable =
-        error instanceof Error ? error.message : 'Failed to reach Steward AI Assistant.';
+        error instanceof Error ? error.message : 'Failed to reach GiniApp.';
       try {
         const parsedErr = JSON.parse(readable) as { error?: { message?: string; code?: number } };
         if (parsedErr?.error?.message) {
@@ -1745,7 +1745,7 @@ ${actionDocs}`,
         if (msg.type === 'init' && !liveSession) {
           const ai = getGenAIClient();
           const ctx = msg.context || {};
-          const systemInstruction = `You are Steward, a warm, concise, proactive personal voice assistant for ${ctx.userName || 'the user'}.
+          const systemInstruction = `You are GiniApp, a warm, concise, proactive personal voice assistant for ${ctx.userName || 'the user'}.
 ${ctx.addressName ? `Address the user as ${ctx.addressName}. ` : ''}Current Local Date/Time: ${ctx.currentDateTime || new Date().toISOString()}
 
 MEMORY OF COMPLETED TASKS:

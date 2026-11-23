@@ -334,7 +334,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
       }
       setTimeout(() => scrollEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 40);
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Unable to reach Steward AI Assistant.');
+      setErrorMsg(err instanceof Error ? err.message : 'Could not reach the desk just now.');
     } finally {
       setSending(false);
     }
@@ -475,7 +475,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/50 backdrop-blur-sm">
       <div
         role="dialog"
-        aria-label="Steward AI Assistant"
+        aria-label="GiniApp"
         className="w-full max-w-lg h-full bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 flex flex-col shadow-2xl"
       >
         {/* Header */}
@@ -484,7 +484,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
             <Sparkles className="w-5 h-5 text-teal-700 dark:text-teal-400 shrink-0 mt-0.5" />
             <div className="min-w-0">
               <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100 font-display">
-                Steward AI Assistant
+                GiniApp
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 {pendingTasksCount} pending tasks · {propertyEntries.length} Wimberley logs ·{' '}
@@ -512,7 +512,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
             <button
               type="button"
               onClick={onClose}
-              aria-label="Close AI Assistant"
+              aria-label="Close"
               className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
             >
               <X className="w-5 h-5" />
@@ -526,7 +526,7 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
             <div className="space-y-5">
               <div className="space-y-2">
                 <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                  Ask anything across your Steward workspace
+                  Ask anything across your desk
                 </p>
                 <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
                   I have live context from your schedule, Wimberley conservancy &amp; rental cabin

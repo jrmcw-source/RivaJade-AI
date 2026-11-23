@@ -61,7 +61,7 @@ export interface WorkspaceBackupSnapshot {
   sharedLists?: Array<Omit<SharedList, 'createdAt' | 'updatedAt'>>;
 }
 
-const DRIVE_FOLDER_NAME = 'Steward Backups';
+const DRIVE_FOLDER_NAME = 'GiniApp Backups';
 
 async function parseDriveError(res: Response, fallback: string): Promise<string> {
   try {
@@ -103,7 +103,7 @@ export async function ensureStewardBackupFolder(accessToken: string): Promise<st
     }),
   });
   if (!createRes.ok) {
-    throw new Error(await parseDriveError(createRes, 'Unable to create Steward Backups folder'));
+    throw new Error(await parseDriveError(createRes, 'Unable to create GiniApp Backups folder'));
   }
   const created = (await createRes.json()) as { id: string };
   return created.id;
@@ -334,7 +334,7 @@ export function buildWimberleyMarkdownBackup(entries: PropertyEntry[]): string {
 
 export function buildOcrVaultMarkdownBackup(documents: ScannedDocument[]): string {
   const lines = [
-    `# Steward OCR Document Vault Archive (${getLocalTodayIso()})`,
+    `# GiniApp Document Vault Archive (${getLocalTodayIso()})`,
     '',
     `Total scanned records: ${documents.length}`,
     '',
@@ -441,7 +441,7 @@ export async function uploadDriveBinaryFile(
   return (await res.json()) as DriveBackupFile;
 }
 
-const PHOTOS_FOLDER_NAME = 'Steward Document Photos';
+const PHOTOS_FOLDER_NAME = 'GiniApp Document Photos';
 
 export async function ensureStewardPhotosFolder(accessToken: string): Promise<string> {
   const query = encodeURIComponent(
@@ -473,7 +473,7 @@ export async function ensureStewardPhotosFolder(accessToken: string): Promise<st
     }),
   });
   if (!createRes.ok) {
-    throw new Error(await parseDriveError(createRes, 'Unable to create Steward Document Photos folder'));
+    throw new Error(await parseDriveError(createRes, 'Unable to create GiniApp Document Photos folder'));
   }
   const created = (await createRes.json()) as { id: string };
   return created.id;

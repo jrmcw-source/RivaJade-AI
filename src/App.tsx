@@ -544,7 +544,7 @@ function MainApp() {
             const batch = writeBatch(db);
             batch.set(userDocRef, {
               userId: nextUser.uid,
-              displayName: nextUser.displayName || 'Steward User',
+              displayName: nextUser.displayName || 'GiniApp User',
               username: finalHandle,
               photoURL: nextUser.photoURL || '',
               defaultReminderMinutes: 60,
@@ -564,7 +564,7 @@ function MainApp() {
             batch.set(doc(db, 'userHandles', finalHandle), {
               userId: nextUser.uid,
               username: finalHandle,
-              displayName: nextUser.displayName || 'Steward User',
+              displayName: nextUser.displayName || 'GiniApp User',
               photoURL: nextUser.photoURL || '',
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
@@ -2306,7 +2306,7 @@ function MainApp() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           context: {
-            userName: userProfile?.displayName || user.displayName || 'Steward User',
+            userName: userProfile?.displayName || user.displayName || 'GiniApp User',
             addressName: userProfile?.addressName || '',
             aiAccess: userProfile?.aiAccess !== false,
             currentDateTime: new Date().toLocaleString('en-US', {
@@ -2472,11 +2472,11 @@ function MainApp() {
   }
 
   // Vault recovery (Jason, 2026-11-21): the recovery key lives as a
-  // small file in the owner's own Drive, in the Steward Backups
+  // small file in the owner's own Drive, in the GiniApp Backups
   // folder. Saving writes or replaces that one file; recovering
   // reads it back and opens the vault with it — the records belong
   // to their depositor, and the owner's own sign-in is the proof.
-  const RECOVERY_KEY_FILE_NAME = 'Steward-Recovery-Key.json';
+  const RECOVERY_KEY_FILE_NAME = 'GiniApp-Recovery-Key.json';
 
   async function handleSaveRecoveryKey() {
     const keyB64 = getRecoveryKeyB64();
@@ -2498,7 +2498,7 @@ function MainApp() {
       const existing = files.find((f) => f.name === RECOVERY_KEY_FILE_NAME);
       const content = JSON.stringify(
         {
-          app: 'Steward',
+          app: 'GiniApp',
           kind: 'vault-recovery-key',
           version: 1,
           recoveryKey: keyB64,
@@ -2523,7 +2523,7 @@ function MainApp() {
       }
       markRecoveryKeySaved();
       setRecoverySaved(true);
-      setVaultFeedback('Your recovery key is saved in your Drive, in the Steward Backups folder.');
+      setVaultFeedback('Your recovery key is saved in your Drive, in the GiniApp Backups folder.');
     } catch {
       setVaultFeedback('The recovery key could not be saved just now. Try again.');
     } finally {
@@ -2550,7 +2550,7 @@ function MainApp() {
       const file = files.find((f) => f.name === RECOVERY_KEY_FILE_NAME);
       if (!file) {
         setVaultFeedback(
-          'No recovery key file was found in your Drive. If it was saved, it sits in the Steward Backups folder.'
+          'No recovery key file was found in your Drive. If it was saved, it sits in the GiniApp Backups folder.'
         );
         return;
       }
@@ -3500,7 +3500,7 @@ function MainApp() {
       await addDoc(collection(db, 'families'), {
         name,
         ownerId: user.uid,
-        ownerName: userProfile.displayName || user.displayName || 'Steward User',
+        ownerName: userProfile.displayName || user.displayName || 'GiniApp User',
         memberIds: [user.uid],
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -3522,7 +3522,7 @@ function MainApp() {
       const ref = await addDoc(collection(db, 'families'), {
         name: trimmed,
         ownerId: user.uid,
-        ownerName: userProfile.displayName || user.displayName || 'Steward User',
+        ownerName: userProfile.displayName || user.displayName || 'GiniApp User',
         memberIds: [user.uid],
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -3983,7 +3983,7 @@ function MainApp() {
         body: JSON.stringify({
           kind: 'mail',
           context: {
-            userName: userProfile.displayName || user.displayName || 'Steward User',
+            userName: userProfile.displayName || user.displayName || 'GiniApp User',
             addressName: userProfile.addressName || '',
             aiAccess: userProfile.aiAccess !== false,
             currentDateTime: new Date().toLocaleString('en-US', {
@@ -4705,14 +4705,14 @@ function MainApp() {
   async function resolveBackupFolderId(token: string): Promise<string> {
     const st = headedStorage();
     if (st?.rootChoice === 'custom' && st.rootId) {
-      return ensureStewardSubfolder(token, st.rootId, 'Steward Backups');
+      return ensureStewardSubfolder(token, st.rootId, 'GiniApp Backups');
     }
     return ensureStewardBackupFolder(token);
   }
 
   // Backup everything, every day (Jason, 2026-11-21): while Drive
   // is connected, the desk writes one whole-desk snapshot a day to
-  // the Steward Backups folder on its own — records, families,
+  // the GiniApp Backups folder on its own — records, families,
   // circles, households, notes, briefings, finances above all. The
   // day stamp lives in this browser; a day with no open desk gets
   // its snapshot on the next open instead.
@@ -4818,7 +4818,7 @@ function MainApp() {
         try {
           const folderId =
             st?.rootChoice === 'custom' && st.rootId
-              ? await ensureStewardSubfolder(token, st.rootId, 'Steward Backups')
+              ? await ensureStewardSubfolder(token, st.rootId, 'GiniApp Backups')
               : await ensureStewardBackupFolder(token);
           await createDriveBackupFile(token, {
             folderId,
@@ -4901,7 +4901,7 @@ function MainApp() {
         body: JSON.stringify({
           kind: 'circles',
           context: {
-            userName: userProfile?.displayName || user.displayName || 'Steward User',
+            userName: userProfile?.displayName || user.displayName || 'GiniApp User',
             addressName: userProfile?.addressName || '',
             aiAccess: userProfile?.aiAccess !== false,
             currentDateTime: new Date().toLocaleString('en-US', {
@@ -6290,7 +6290,7 @@ function MainApp() {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
         <div className="text-sm font-medium text-slate-600 dark:text-slate-400">
-          Loading Steward workspace...
+          Loading GiniApp...
         </div>
       </div>
     );
@@ -6356,7 +6356,7 @@ function MainApp() {
         <div className="space-y-6">
           <div className="px-2">
             <span className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-100 font-display">
-              Steward
+              GiniApp
             </span>
             {activeHousehold &&
               (households.length > 1 ? (
@@ -6473,7 +6473,7 @@ function MainApp() {
           <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-8">
             <div className="flex items-center gap-3 min-w-0">
               <span className="lg:hidden text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100 font-display whitespace-nowrap shrink-0">
-                Steward
+                GiniApp
               </span>
               <span className="hidden lg:inline text-sm text-slate-500 dark:text-slate-400 whitespace-nowrap shrink-0">
                 {navItems.find((i) => i.id === activeTab)?.label}
@@ -6924,7 +6924,7 @@ function MainApp() {
               className="space-y-2"
             >
               <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
-                How Steward addresses you (the front door greeting — for example, Ms. Gini)
+                How GiniApp addresses you (the front door greeting — for example, Ms. Gini)
               </label>
               <div className="flex gap-2">
                 <input
@@ -6969,7 +6969,7 @@ function MainApp() {
                   className="mt-0.5"
                 />
                 <span>
-                  Include my email in the morning briefing. Steward reads my Gmail —
+                  Include my email in the morning briefing. GiniApp reads my Gmail —
                   read-only, it never sends — and the briefing names what needs me and
                   what I am waiting on. This switch is mine alone: it covers only my
                   account, on my word.
@@ -7219,7 +7219,7 @@ function MainApp() {
                       recoveryKeyInHand ? (
                         recoverySaved ? (
                           <p className="text-xs text-slate-500 dark:text-slate-400">
-                            Your recovery key is saved in your Drive, in the Steward
+                            Your recovery key is saved in your Drive, in the GiniApp
                             Backups folder. If you forget your passphrase, it opens
                             your vault again.
                           </p>
@@ -8380,7 +8380,7 @@ function MainApp() {
 
             <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                About Steward
+                About GiniApp
               </h3>
               <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
                 What this desk is, what it is not, and the agreement every person
@@ -8927,7 +8927,7 @@ function MainApp() {
               <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
                 The family head chooses where this family's records are stored. The desk's
                 own answer — and the common, safe one — is one host root folder: the
-                Steward folder it sets up in Drive. One root keeps everything inside the
+                GiniApp folder it sets up in Drive. One root keeps everything inside the
                 protection, the sharing, and the backup at once, and there is one place
                 to guard. The files are held in the vault and the tags do the work, so a
                 record moving between private, household, and family never needs its
@@ -8967,7 +8967,7 @@ function MainApp() {
                       className="mt-0.5"
                     />
                     <span>
-                      One root folder — the Steward folder the desk sets up (recommended).
+                      One root folder — the GiniApp folder the desk sets up (recommended).
                     </span>
                   </label>
                   <label className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400">
@@ -10121,7 +10121,7 @@ function MainApp() {
                 Emergency sheet — {printJob.sheet.forName}
               </h1>
               <p style={{ fontSize: '12px', marginBottom: '16px' }}>
-                Kept by the family in Steward.
+                Kept by the family in GiniApp.
               </p>
               {(
                 [
@@ -10156,7 +10156,7 @@ function MainApp() {
                 </p>
               ))}
               <p style={{ fontSize: '12px', marginTop: '16px' }}>
-                Kept by the family in Steward.
+                Kept by the family in GiniApp.
               </p>
             </div>
           )}

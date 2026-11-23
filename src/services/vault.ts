@@ -30,7 +30,7 @@
 // recovery key and wraps the vault key under it; the wrap and a
 // check value sealed under the recovery key live on the profile,
 // and the recovery key itself is saved as a small file in the
-// owner's own Google Drive (the Steward Backups folder). Recovery
+// owner's own Google Drive (the GiniApp Backups folder). Recovery
 // is then: sign in as yourself, read the key file from your own
 // Drive, and the vault opens — your own account is the proof. A
 // passphrase reset derives a new key, re-seals the owner's records

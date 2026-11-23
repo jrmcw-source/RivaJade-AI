@@ -42,7 +42,7 @@ export function buildIcsCalendar(tasks: ScheduleTask[], calendarName: string): s
   const lines: string[] = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Steward//Household Calendar//EN',
+    'PRODID:-//GiniApp//Family Calendar//EN',
     'CALSCALE:GREGORIAN',
     foldLine(`X-WR-CALNAME:${icsEscape(calendarName)}`),
   ];

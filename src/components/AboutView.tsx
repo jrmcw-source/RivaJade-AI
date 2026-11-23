@@ -23,7 +23,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ mode, onClose, onAccept, o
         <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
-              Steward
+              GiniApp
             </h1>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
               Part of the family.
@@ -49,10 +49,10 @@ export const AboutView: React.FC<AboutViewProps> = ({ mode, onClose, onAccept, o
 
         <div className="space-y-3">
           <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-            What Steward is
+            What GiniApp is
           </h2>
           <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-            Steward keeps a family's papers, dates, lists, and money notes in one
+            GiniApp keeps a family's papers, dates, lists, and money notes in one
             desk, and shares each record exactly as far as its owner says — with a
             person, a household, a family, or a circle the family draws itself.
             Whoever files a record owns it, always. The desk holds records; it does
@@ -62,10 +62,10 @@ export const AboutView: React.FC<AboutViewProps> = ({ mode, onClose, onAccept, o
 
         <div className="space-y-3">
           <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-            What Steward is not
+            What GiniApp is not
           </h2>
           <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-            Steward is an aid, not a legal verdict or a medical diagnostic. It
+            GiniApp is an aid, not a legal verdict or a medical diagnostic. It
             follows the documents a family files — a court's custody order, a
             guardianship paper — but it does not decide what the law is, and it
             does not decide anyone's care. Legal authority lives in the court's
@@ -85,7 +85,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ mode, onClose, onAccept, o
               to restore from.
             </li>
             <li>
-              Steward is an aid for keeping records. Decisions — legal, medical,
+              GiniApp is an aid for keeping records. Decisions — legal, medical,
               financial — belong to you and your family, with your own
               professionals.
             </li>

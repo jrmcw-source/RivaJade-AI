@@ -1318,7 +1318,7 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
         className="fixed inset-0 z-50 bg-slate-950 text-white flex flex-col items-center justify-center px-8 text-center space-y-6 cursor-pointer"
         onPointerDown={wake}
         role="button"
-        aria-label="Wake Steward"
+        aria-label="Wake GiniApp"
       >
         <Moon className="w-14 h-14 text-teal-300" />
         <p className="text-3xl font-semibold leading-snug">{GOODNIGHT_LINE}</p>
@@ -1478,7 +1478,7 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
     <button
       type="button"
       onClick={handleClose}
-      aria-label="Close Steward"
+      aria-label="Close GiniApp"
       className="min-h-[64px] inline-flex items-center justify-center gap-3 px-5 text-xl font-semibold rounded-2xl bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 transition-colors"
     >
       <X className="w-7 h-7" />
@@ -1509,7 +1509,7 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
           <button
             type="button"
             onClick={handleTalkButton}
-            aria-label={hearing ? 'Stop listening' : 'Talk to Steward'}
+            aria-label={hearing ? 'Stop listening' : 'Talk to GiniApp'}
             className={`w-36 h-36 rounded-full inline-flex items-center justify-center text-white transition-colors ${
               hearing
                 ? 'bg-emerald-600 hover:bg-emerald-700 animate-pulse'
@@ -1575,7 +1575,7 @@ export const FrontDoorView: React.FC<FrontDoorViewProps> = (props) => {
           <button
             type="button"
             onClick={handleClose}
-            aria-label="Close Steward"
+            aria-label="Close GiniApp"
             className="min-h-[48px] inline-flex items-center gap-2 px-4 rounded-xl bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-base font-semibold"
           >
             <X className="w-5 h-5" />

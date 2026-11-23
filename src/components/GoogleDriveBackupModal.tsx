@@ -174,7 +174,7 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
       const fId =
         folderId ||
         (storageRootParentId
-          ? await ensureStewardSubfolder(tok, storageRootParentId, 'Steward Backups')
+          ? await ensureStewardSubfolder(tok, storageRootParentId, 'GiniApp Backups')
           : await ensureStewardBackupFolder(tok));
       setFolderId(fId);
       const list = await listDriveBackups(tok, fId);
@@ -280,7 +280,7 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
       const fId =
         folderId ||
         (storageRootParentId
-          ? await ensureStewardSubfolder(accessToken, storageRootParentId, 'Steward Backups')
+          ? await ensureStewardSubfolder(accessToken, storageRootParentId, 'GiniApp Backups')
           : await ensureStewardBackupFolder(accessToken));
       setFolderId(fId);
       const payload = buildPayloadForKind(kind);
@@ -288,7 +288,7 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
         folderId: fId,
         ...payload,
       });
-      setSuccessMsg(`Saved "${created.name}" into your "Steward Backups" Google Drive folder.`);
+      setSuccessMsg(`Saved "${created.name}" into your "GiniApp Backups" Google Drive folder.`);
       await refreshBackups(accessToken);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Backup upload failed.');
@@ -345,7 +345,7 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
         }
       }
       setSuccessMsg(
-        `Document photos are in "Steward Document Photos" in Drive: ${uploaded} new, ${skipped} already there${
+        `Document photos are in "GiniApp Document Photos" in Drive: ${uploaded} new, ${skipped} already there${
           linked > 0 ? `, ${linked} linked to their records` : ''
         }${failed > 0 ? `, ${failed} could not be read` : ''}.`
       );
@@ -418,7 +418,7 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
       const raw = await downloadDriveBackupContent(accessToken, file.id);
       const parsed = JSON.parse(raw) as WorkspaceBackupSnapshot;
       if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.tasks)) {
-        throw new Error('This file is not a recognized Steward workspace JSON backup.');
+        throw new Error('This file is not a recognized GiniApp workspace JSON backup.');
       }
       setConfirmDialog({ action: 'restore', file, snapshot: parsed });
     } catch (err) {
@@ -453,7 +453,7 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
       } else if (dialog.action === 'restore') {
         const res = await onRestoreSnapshot(dialog.snapshot);
         setSuccessMsg(
-          `Restored ${res.importedCount} new items from "${dialog.file.name}" into Steward.`
+          `Restored ${res.importedCount} new items from "${dialog.file.name}" into GiniApp.`
         );
       }
     } catch (err) {
@@ -474,7 +474,7 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
                 Google Drive Backups
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Save snapshots of the whole desk — schedule, papers, property logs, finances, notes, briefings, and the families, circles, and households themselves — into &ldquo;Steward Backups&rdquo;.
+                Save snapshots of the whole desk — schedule, papers, property logs, finances, notes, briefings, and the families, circles, and households themselves — into &ldquo;GiniApp Backups&rdquo;.
               </p>
             </div>
           </div>
@@ -504,7 +504,7 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
         {!accessToken ? (
           <div className="py-8 text-center space-y-4">
             <p className="text-sm text-slate-700 dark:text-slate-300 max-w-md mx-auto">
-              Connect your Google account to save and manage backups in your private &ldquo;Steward Backups&rdquo; folder on Google Drive.
+              Connect your Google account to save and manage backups in your private &ldquo;GiniApp Backups&rdquo; folder on Google Drive.
             </p>
             <button
               type="button"
@@ -631,7 +631,7 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
                         documents.filter((d) => d.imageUrl && d.imageUrl.startsWith('/api/uploads/'))
                           .length
                       }{' '}
-                      scanned photos, kept in "Steward Document Photos" in Drive — their
+                      scanned photos, kept in "GiniApp Document Photos" in Drive — their
                       permanent home, so a lost server copy can be restored
                     </p>
                   </div>
@@ -661,7 +661,7 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
             <div className="space-y-3 border-t border-slate-200 dark:border-slate-800 pt-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Files in &ldquo;Steward Backups&rdquo; ({files.length})
+                  Files in &ldquo;GiniApp Backups&rdquo; ({files.length})
                 </h3>
                 <button
                   type="button"
@@ -678,7 +678,7 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
                 <p className="text-xs text-slate-500 dark:text-slate-400 py-4 text-center">
                   {loadingFiles
                     ? 'Loading Google Drive backups...'
-                    : 'No backup files saved in Steward Backups yet. Choose a backup format above.'}
+                    : 'No backup files saved in GiniApp Backups yet. Choose a backup format above.'}
                 </p>
               ) : (
                 <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl">
@@ -778,8 +778,8 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
                   {confirmDialog.action === 'delete'
                     ? 'This permanently removes the backup file from your Google Drive account. Your local/Firestore app data will not be deleted.'
                     : confirmDialog.action === 'overwrite'
-                    ? 'This will overwrite the existing file content in your Google Drive "Steward Backups" folder with your current Steward data.'
-                    : `Found ${confirmDialog.snapshot.tasks.length} tasks, ${confirmDialog.snapshot.documents.length} documents, ${confirmDialog.snapshot.propertyEntries.length} property entries, and ${confirmDialog.snapshot.financeEntries.length} financial entries. Missing items will be added to your Steward account without deleting existing records.`}
+                    ? 'This will overwrite the existing file content in your Google Drive "GiniApp Backups" folder with your current GiniApp data.'
+                    : `Found ${confirmDialog.snapshot.tasks.length} tasks, ${confirmDialog.snapshot.documents.length} documents, ${confirmDialog.snapshot.propertyEntries.length} property entries, and ${confirmDialog.snapshot.financeEntries.length} financial entries. Missing items will be added to your GiniApp account without deleting existing records.`}
                 </p>
               </div>
             </div>
