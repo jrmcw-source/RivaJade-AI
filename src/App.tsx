@@ -19,6 +19,7 @@ import {
   Calendar,
   FileSearch,
   Users,
+  BookUser,
   Mic,
   BarChart3,
   Plus,
@@ -188,6 +189,7 @@ type NavTab =
   | 'finances'
   | 'vault'
   | 'projects'
+  | 'contacts'
 
 function sanitizeHandle(raw: string, fallbackUid: string): string {
   const cleaned = raw
@@ -3045,6 +3047,29 @@ function MainApp() {
     }
   }
 
+
+
+  // Contacts page: a stored birthday ("1942-11-30", or "11-30" when the
+  // year is not known) in plain words.
+  function formatContactDate(value: string): string {
+    const v = value.trim();
+    const full = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+    if (full) {
+      return new Date(`${v}T12:00:00`).toLocaleDateString('en-US', {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+      });
+    }
+    const md = /^(\d{2})-(\d{2})$/.exec(v);
+    if (md) {
+      return new Date(`2000-${md[1]}-${md[2]}T12:00:00`).toLocaleDateString('en-US', {
+        month: 'long',
+        day: 'numeric',
+      });
+    }
+    return v;
+  }
 
   // ---- Email filing (Jason, 2026-11-21) ----
   // The owner of the mailbox files a message as a record, under
@@ -6310,6 +6335,7 @@ function MainApp() {
   }> = [
     { id: 'frontdoor', label: 'Front Desk', mobileLabel: 'Front Desk', icon: <Home className="w-4 h-4" /> },
     { id: 'schedule', label: 'Schedule', icon: <Calendar className="w-4 h-4" /> },
+    { id: 'contacts', label: 'Contacts', icon: <BookUser className="w-4 h-4" /> },
     {
       id: 'property',
       label: 'Wimberley Property',
@@ -6328,7 +6354,7 @@ function MainApp() {
   ];
 
   const mobileBottomItems = navItems.filter((item) =>
-    ['frontdoor', 'schedule', 'property', 'finances', 'vault'].includes(item.id)
+    ['frontdoor', 'schedule', 'contacts', 'property', 'finances', 'vault'].includes(item.id)
   );
 
   return (
@@ -6724,6 +6750,218 @@ function MainApp() {
             />
           )}
 
+
+          {activeTab === 'contacts' && (
+            <div className="space-y-4">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Contacts</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Everybody's numbers, addresses, and birthdays in one place. Tap a
+                  number to call it.
+                </p>
+              </div>
+              <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                One entry per person: the full address record and every way to reach them.
+                A Physical Address is where the building is. A Billing Address is only where
+                billing mail goes — it says nothing about location, and the two are never
+                merged. You choose how far your own entry reaches; leave yourself out
+                entirely by not making one.
+              </p>
+              {directoryEntries.length > 0 && (
+                <div className="space-y-1.5">
+                  {directoryEntries.map((entry) => (
+                    <div
+                      key={entry.id}
+                      className="px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg space-y-0.5"
+                    >
+                      <p className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                        {entry.displayName}
+                        <span className="font-normal text-slate-500 dark:text-slate-400">
+                          {' '}
+                          —{' '}
+                          {entry.userId === user.uid
+                            ? 'your entry'
+                            : entry.scope === 'family'
+                              ? 'shared with the family'
+                              : entry.scope === 'household'
+                                ? 'shared with the household'
+                                : 'shared with you'}
+                        </span>
+                      </p>
+                      {entry.birthday ? (
+                        <p className="text-sm text-slate-600 dark:text-slate-300">
+                          Birthday: {formatContactDate(entry.birthday)}
+                        </p>
+                      ) : null}
+                      {entry.anniversary ? (
+                        <p className="text-sm text-slate-600 dark:text-slate-300">
+                          {entry.anniversaryLabel || 'Anniversary'}: {formatContactDate(entry.anniversary)}
+                        </p>
+                      ) : null}
+                      {entry.physicalAddress ? (
+                        <p className="text-sm whitespace-pre-line text-slate-600 dark:text-slate-300">
+                          Physical Address: {entry.physicalAddress}
+                        </p>
+                      ) : null}
+                      {entry.billingAddress ? (
+                        <p className="text-sm whitespace-pre-line text-slate-600 dark:text-slate-300">
+                          Billing Address (mail only): {entry.billingAddress}
+                        </p>
+                      ) : null}
+                      {(entry.phones || []).map((ph) => (
+                        <p key={ph} className="text-sm text-slate-700 dark:text-slate-200">
+                          Phone:{' '}
+                          <a
+                            href={`tel:${ph.replace(/[^+\d]/g, '')}`}
+                            className="font-medium text-teal-700 dark:text-teal-300 underline"
+                          >
+                            {ph}
+                          </a>
+                        </p>
+                      ))}
+                      {(entry.emails || []).map((em) => (
+                        <p key={em} className="text-sm text-slate-700 dark:text-slate-200">
+                          Email:{' '}
+                          <a href={`mailto:${em}`} className="font-medium text-teal-700 dark:text-teal-300 underline">
+                            {em}
+                          </a>
+                        </p>
+                      ))}
+                      {entry.notes ? (
+                        <p className="text-sm text-slate-500 dark:text-slate-400">{entry.notes}</p>
+                      ) : null}
+                      {entry.userId === user.uid && (
+                        <div className="flex items-center gap-1.5 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => handleEditDirectoryEntry(entry)}
+                            className="min-h-[28px] px-2 text-[11px] font-medium text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-900 rounded-md"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteDirectoryEntry(entry)}
+                            className="min-h-[28px] px-2 text-[11px] font-medium text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-md"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}              <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 pt-2">Add someone, or fix an entry</p>
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  value={dirName}
+                  onChange={(e) => setDirName(e.target.value)}
+                  placeholder="Name the family knows you by"
+                  className="w-full min-h-[38px] px-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                />
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <input
+                    type="text"
+                    value={dirBirthday}
+                    onChange={(e) => setDirBirthday(e.target.value)}
+                    placeholder="Birthday — 1985-06-14, or 06-14"
+                    className="w-full min-h-[38px] px-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                  />
+                  <input
+                    type="text"
+                    value={dirAnniversary}
+                    onChange={(e) => setDirAnniversary(e.target.value)}
+                    placeholder="Anniversary — 2010-09-03, or 09-03"
+                    className="w-full min-h-[38px] px-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                  />
+                  <input
+                    type="text"
+                    value={dirAnniversaryLabel}
+                    onChange={(e) => setDirAnniversaryLabel(e.target.value)}
+                    placeholder="What the anniversary marks — Wedding"
+                    className="w-full min-h-[38px] px-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                  />
+                </div>
+                <textarea
+                  value={dirPhysical}
+                  onChange={(e) => setDirPhysical(e.target.value)}
+                  placeholder={'Physical Address — where the building is\nStreet, city, state, ZIP'}
+                  rows={2}
+                  className="w-full px-2.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                />
+                <textarea
+                  value={dirBilling}
+                  onChange={(e) => setDirBilling(e.target.value)}
+                  placeholder={'Billing Address — only where billing mail goes\nStreet or PO box, city, state, ZIP'}
+                  rows={2}
+                  className="w-full px-2.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <textarea
+                    value={dirPhonesText}
+                    onChange={(e) => setDirPhonesText(e.target.value)}
+                    placeholder={'Phone numbers, one per line'}
+                    rows={2}
+                    className="w-full px-2.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                  />
+                  <textarea
+                    value={dirEmailsText}
+                    onChange={(e) => setDirEmailsText(e.target.value)}
+                    placeholder={'Email addresses, one per line'}
+                    rows={2}
+                    className="w-full px-2.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                  />
+                </div>
+                <input
+                  type="text"
+                  value={dirNotes}
+                  onChange={(e) => setDirNotes(e.target.value)}
+                  placeholder="Notes (gate code, best hours to call…) — optional"
+                  className="w-full min-h-[38px] px-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                    <span>Who can see it:</span>
+                    <select
+                      value={dirScope}
+                      onChange={(e) => setDirScope(e.target.value as 'private' | 'household' | 'family')}
+                      className="min-h-[34px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                    >
+                      <option value="private">Only me</option>
+                      <option value="household">My household</option>
+                      <option value="family">My family</option>
+                    </select>
+                  </label>
+                  {dirScope === 'family' && (
+                    <select
+                      value={dirFamilyId}
+                      onChange={(e) => setDirFamilyId(e.target.value)}
+                      className="min-h-[34px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
+                    >
+                      <option value="">Pick the family</option>
+                      {families.map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveDirectoryEntry()}
+                    className="min-h-[34px] px-3 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-md"
+                  >
+                    {dirEditingId ? 'Save my entry' : 'Add my entry'}
+                  </button>
+                </div>
+                {dirFeedback && (
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">{dirFeedback}</p>
+                )}
+              </div>
+
+            </div>
+          )}
 
         </main>
       </div>
@@ -7562,191 +7800,6 @@ function MainApp() {
               )}
             </div>
 
-            <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                Family directory
-              </h3>
-              <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-                One entry per person: the full address record and every way to reach them.
-                A Physical Address is where the building is. A Billing Address is only where
-                billing mail goes — it says nothing about location, and the two are never
-                merged. You choose how far your own entry reaches; leave yourself out
-                entirely by not making one.
-              </p>
-              <div className="space-y-2">
-                <input
-                  type="text"
-                  value={dirName}
-                  onChange={(e) => setDirName(e.target.value)}
-                  placeholder="Name the family knows you by"
-                  className="w-full min-h-[38px] px-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
-                />
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <input
-                    type="text"
-                    value={dirBirthday}
-                    onChange={(e) => setDirBirthday(e.target.value)}
-                    placeholder="Birthday — 1985-06-14, or 06-14"
-                    className="w-full min-h-[38px] px-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
-                  />
-                  <input
-                    type="text"
-                    value={dirAnniversary}
-                    onChange={(e) => setDirAnniversary(e.target.value)}
-                    placeholder="Anniversary — 2010-09-03, or 09-03"
-                    className="w-full min-h-[38px] px-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
-                  />
-                  <input
-                    type="text"
-                    value={dirAnniversaryLabel}
-                    onChange={(e) => setDirAnniversaryLabel(e.target.value)}
-                    placeholder="What the anniversary marks — Wedding"
-                    className="w-full min-h-[38px] px-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
-                  />
-                </div>
-                <textarea
-                  value={dirPhysical}
-                  onChange={(e) => setDirPhysical(e.target.value)}
-                  placeholder={'Physical Address — where the building is\nStreet, city, state, ZIP'}
-                  rows={2}
-                  className="w-full px-2.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
-                />
-                <textarea
-                  value={dirBilling}
-                  onChange={(e) => setDirBilling(e.target.value)}
-                  placeholder={'Billing Address — only where billing mail goes\nStreet or PO box, city, state, ZIP'}
-                  rows={2}
-                  className="w-full px-2.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
-                />
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <textarea
-                    value={dirPhonesText}
-                    onChange={(e) => setDirPhonesText(e.target.value)}
-                    placeholder={'Phone numbers, one per line'}
-                    rows={2}
-                    className="w-full px-2.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
-                  />
-                  <textarea
-                    value={dirEmailsText}
-                    onChange={(e) => setDirEmailsText(e.target.value)}
-                    placeholder={'Email addresses, one per line'}
-                    rows={2}
-                    className="w-full px-2.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
-                  />
-                </div>
-                <input
-                  type="text"
-                  value={dirNotes}
-                  onChange={(e) => setDirNotes(e.target.value)}
-                  placeholder="Notes (gate code, best hours to call…) — optional"
-                  className="w-full min-h-[38px] px-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
-                />
-                <div className="flex flex-wrap items-center gap-2">
-                  <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
-                    <span>Who can see it:</span>
-                    <select
-                      value={dirScope}
-                      onChange={(e) => setDirScope(e.target.value as 'private' | 'household' | 'family')}
-                      className="min-h-[34px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
-                    >
-                      <option value="private">Only me</option>
-                      <option value="household">My household</option>
-                      <option value="family">My family</option>
-                    </select>
-                  </label>
-                  {dirScope === 'family' && (
-                    <select
-                      value={dirFamilyId}
-                      onChange={(e) => setDirFamilyId(e.target.value)}
-                      className="min-h-[34px] px-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
-                    >
-                      <option value="">Pick the family</option>
-                      {families.map((f) => (
-                        <option key={f.id} value={f.id}>
-                          {f.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => void handleSaveDirectoryEntry()}
-                    className="min-h-[34px] px-3 text-xs font-medium text-white bg-teal-700 hover:bg-teal-800 rounded-md"
-                  >
-                    {dirEditingId ? 'Save my entry' : 'Add my entry'}
-                  </button>
-                </div>
-                {dirFeedback && (
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">{dirFeedback}</p>
-                )}
-              </div>
-              {directoryEntries.length > 0 && (
-                <div className="space-y-1.5">
-                  {directoryEntries.map((entry) => (
-                    <div
-                      key={entry.id}
-                      className="px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg space-y-0.5"
-                    >
-                      <p className="text-xs font-medium text-slate-900 dark:text-slate-100">
-                        {entry.displayName}
-                        <span className="font-normal text-slate-500 dark:text-slate-400">
-                          {' '}
-                          —{' '}
-                          {entry.userId === user.uid
-                            ? 'your entry'
-                            : entry.scope === 'family'
-                              ? 'shared with the family'
-                              : entry.scope === 'household'
-                                ? 'shared with the household'
-                                : 'shared with you'}
-                        </span>
-                      </p>
-                      {entry.physicalAddress ? (
-                        <p className="text-[11px] whitespace-pre-line text-slate-600 dark:text-slate-300">
-                          Physical Address: {entry.physicalAddress}
-                        </p>
-                      ) : null}
-                      {entry.billingAddress ? (
-                        <p className="text-[11px] whitespace-pre-line text-slate-600 dark:text-slate-300">
-                          Billing Address (mail only): {entry.billingAddress}
-                        </p>
-                      ) : null}
-                      {(entry.phones || []).map((ph) => (
-                        <p key={ph} className="text-[11px] text-slate-600 dark:text-slate-300">
-                          Phone: {ph}
-                        </p>
-                      ))}
-                      {(entry.emails || []).map((em) => (
-                        <p key={em} className="text-[11px] text-slate-600 dark:text-slate-300">
-                          Email: {em}
-                        </p>
-                      ))}
-                      {entry.notes ? (
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400">{entry.notes}</p>
-                      ) : null}
-                      {entry.userId === user.uid && (
-                        <div className="flex items-center gap-1.5 pt-1">
-                          <button
-                            type="button"
-                            onClick={() => handleEditDirectoryEntry(entry)}
-                            className="min-h-[28px] px-2 text-[11px] font-medium text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-900 rounded-md"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void handleDeleteDirectoryEntry(entry)}
-                            className="min-h-[28px] px-2 text-[11px] font-medium text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-md"
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
 
             <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
