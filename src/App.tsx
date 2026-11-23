@@ -3944,7 +3944,12 @@ function MainApp() {
     } catch (err) {
       console.error('Gmail connect failed', err);
       setGmailConnected(false);
-      setEmailFeedback('Email did not connect. Please try again.');
+      const code = (err as { code?: string })?.code || '';
+      setEmailFeedback(
+        code === 'auth/user-mismatch'
+          ? 'Email did not connect: Google needs the same account you signed in to the desk with. Please try again with that account.'
+          : `Email did not connect${code ? ` (${code})` : ''}. Please try again.`
+      );
     }
   }
 
