@@ -1987,8 +1987,15 @@ function isValidGiveProposal(data) {
     }
 
     match /emergencySheets/{sheetId} {
-      allow get: if isSignedIn() && isValidId(sheetId) && canAccessRecord();
-      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || request.auth.uid in resource.data.get('memberIds', []));
+      // A decider who is not the sheet's owner or audience still
+      // reads it (the app's decider listener queries decidedByIds
+      // array-contains; a list query the rule cannot prove is
+      // rejected whole). Fixed live in AI Studio 2026-11-22 and
+      // mirrored here the same day so a pull cannot overwrite it.
+      allow get: if isSignedIn() && isValidId(sheetId)
+        && (canAccessRecord()
+          || request.auth.uid in existing().get('decidedByIds', []));
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || request.auth.uid in resource.data.get('memberIds', []) || request.auth.uid in resource.data.get('decidedByIds', []));
       allow create: if isVerifiedUser()
         && isValidId(sheetId)
         && isValidEmergencySheet(incoming())
