@@ -338,6 +338,7 @@ function MainApp() {
   const [dismissedReminders, setDismissedReminders] = useState<Record<string, boolean>>({});
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardDismissed, setWizardDismissed] = useState(false);
   const wizardFamilyRef = useRef<{ id: string; name: string } | null>(null);
   const [driveBackupOpen, setDriveBackupOpen] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(false);
@@ -4566,7 +4567,8 @@ function MainApp() {
       userProfile.setupDone !== true &&
       families.length === 0
   );
-  const wizardActive = !eulaNeeded && (wizardOpen || wizardNeeded);
+  const wizardActive =
+    !eulaNeeded && !wizardDismissed && (wizardOpen || wizardNeeded);
 
   async function handleAcceptEula() {
     if (!db || !user) return;
@@ -8390,6 +8392,7 @@ function MainApp() {
                 type="button"
                 onClick={() => {
                   setSettingsOpen(false);
+                  setWizardDismissed(false);
                   setWizardOpen(true);
                 }}
                 className="min-h-[36px] px-3 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-md text-slate-700 dark:text-slate-200 ml-2"
@@ -10241,7 +10244,11 @@ function MainApp() {
             await handleUpdateDeskPrefs(patch);
           }}
           onFinish={() => {
+            // Closing always works in this session, even if the
+            // setupDone save is refused (pass 24) — the wizard must
+            // never hold the desk shut.
             setWizardOpen(false);
+            setWizardDismissed(true);
             void handleUpdateDeskPrefs({ setupDone: true });
           }}
         />

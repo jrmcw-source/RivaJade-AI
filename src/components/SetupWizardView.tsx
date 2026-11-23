@@ -56,6 +56,7 @@ export default function SetupWizardView(props: SetupWizardViewProps) {
   async function next() {
     setNote('');
     setBusy(true);
+    let failed = false;
     try {
       if (step === 1) {
         await props.onSaveName(displayName.trim(), addressName.trim());
@@ -74,8 +75,18 @@ export default function SetupWizardView(props: SetupWizardViewProps) {
       } else if (step === 5) {
         await props.onSaveAiPrefs({ aiAccess, aiConnectors, aiWrite });
       }
+    } catch {
+      // A save that fails must never trap the step (pass 24): say so
+      // in plain words and move on — the same thing can be finished
+      // later in Settings.
+      failed = true;
     } finally {
       setBusy(false);
+    }
+    if (failed) {
+      setNote(
+        'That step did not save just now. You can finish it later in Settings — moving on.'
+      );
     }
     setStep((s) => Math.min(last, s + 1));
   }
@@ -277,9 +288,6 @@ export default function SetupWizardView(props: SetupWizardViewProps) {
                 Connect Google Drive
               </button>
             )}
-            {note && (
-              <p className="text-sm text-amber-700 dark:text-amber-400">{note}</p>
-            )}
           </div>
         )}
 
@@ -328,6 +336,10 @@ export default function SetupWizardView(props: SetupWizardViewProps) {
               sidebar.
             </p>
           </div>
+        )}
+
+        {note && (
+          <p className="text-sm text-amber-700 dark:text-amber-400">{note}</p>
         )}
 
         <div className="flex items-center justify-between gap-3 pt-2">
