@@ -155,7 +155,6 @@ const VALID_NAV_TABS: readonly AssistantNavTarget[] = [
   'vault',
   'projects',
   'voice',
-  'analytics',
 ];
 
 const VALID_PROPERTY_AREAS: readonly PropertyEntryArea[] = [
