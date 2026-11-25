@@ -5953,11 +5953,206 @@ function MainApp() {
     }
   }
 
+  // R5 — the family starter kit (Jason, 2026-11-24). A starter
+  // kit is a snapshot authored ahead of the family: the roster,
+  // the households, and the Contacts sheet, all under a
+  // placeholder owner. Importing one re-roots everything to the
+  // person importing it, using the same write shapes the setup
+  // wizard and the Contacts form use, so the desk opens already
+  // knowing this family. It is idempotent: the family is reused
+  // (this build holds exactly one), households match by name,
+  // and Contacts entries match by the name the family knows.
+  async function importStarterKit(
+    snapshot: WorkspaceBackupSnapshot
+  ): Promise<number> {
+    if (!user) return 0;
+    let count = 0;
+    const myName = userProfile?.displayName || user.displayName || 'GiniApp User';
+    const myHandle = userProfile?.username || sanitizeHandle('owner', user.uid);
+
+    // The family: reuse the one already on the desk and merge
+    // the kit roster into it by name; create it only if the
+    // desk has none.
+    const kitFamily = Array.isArray(snapshot.families) ? snapshot.families[0] : undefined;
+    let familyId = '';
+    let familyMemberIds: string[] = [user.uid];
+    const existingFamily =
+      families.find((f) => f.ownerId === user.uid || f.memberIds.includes(user.uid)) ||
+      activeFamily;
+    if (existingFamily) {
+      familyId = existingFamily.id;
+      familyMemberIds = existingFamily.memberIds;
+      const kitPeople = Array.isArray(kitFamily?.people) ? kitFamily.people : [];
+      if (kitPeople.length > 0) {
+        const have = new Set(
+          (existingFamily.people || []).map((p) => p.name.trim().toLowerCase())
+        );
+        const merged = [...(existingFamily.people || [])];
+        let changed = false;
+        for (const person of kitPeople) {
+          const key = String(person.name || '').trim().toLowerCase();
+          if (key && !have.has(key)) {
+            merged.push(person);
+            have.add(key);
+            changed = true;
+          }
+        }
+        if (changed) {
+          try {
+            await updateDoc(doc(db, 'families', familyId), {
+              people: merged,
+              ...streamFieldsFor(existingFamily, merged, familyMemberIds),
+              updatedAt: serverTimestamp(),
+            });
+            count += 1;
+          } catch {
+            // Not the family owner — the roster merge is the
+            // owner's to make; the rest of the kit still lands.
+          }
+        }
+      }
+    } else if (kitFamily) {
+      try {
+        const people = Array.isArray(kitFamily.people) ? kitFamily.people : [];
+        const ref = await addDoc(collection(db, 'families'), {
+          name: String(kitFamily.name || 'Our Family').slice(0, 120),
+          ownerId: user.uid,
+          ownerName: myName.slice(0, 120),
+          memberIds: [user.uid],
+          people,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        familyId = ref.id;
+        const famObj = {
+          id: familyId,
+          name: String(kitFamily.name || 'Our Family').slice(0, 120),
+          ownerId: user.uid,
+          memberIds: [user.uid],
+          people,
+        } as unknown as Family;
+        await updateDoc(doc(db, 'families', familyId), {
+          ...streamFieldsFor(famObj, people, [user.uid]),
+          updatedAt: serverTimestamp(),
+        });
+        count += 1;
+      } catch {
+        familyId = '';
+      }
+    }
+
+    // The households: match by name against the desk, create
+    // the missing ones with the wizard batch (household card
+    // plus the owner's member card), linked to the family with
+    // the kit invitations already on them.
+    const householdIdByName = new Map<string, string>();
+    for (const h of households) {
+      householdIdByName.set(h.name.trim().toLowerCase(), h.householdId);
+    }
+    const kitHouseholdIds: string[] = [];
+    for (const kh of Array.isArray(snapshot.households) ? snapshot.households : []) {
+      const name = String(kh.name || '').trim().slice(0, 120);
+      if (!name) continue;
+      const key = name.toLowerCase();
+      const known = householdIdByName.get(key);
+      if (known) {
+        kitHouseholdIds.push(known);
+        continue;
+      }
+      try {
+        const householdId = createSafeId('hh');
+        const batch = writeBatch(db);
+        batch.set(doc(db, 'households', householdId), {
+          householdId,
+          name,
+          ownerId: user.uid,
+          ownerName: myName.slice(0, 120),
+          memberIds: [user.uid],
+          invitedEmails: Array.isArray(kh.invitedEmails)
+            ? kh.invitedEmails.map(String).slice(0, 25)
+            : [],
+          ...(familyId ? { familyId } : {}),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        batch.set(doc(db, 'households', householdId, 'members', user.uid), {
+          userId: user.uid,
+          householdId,
+          householdOwnerId: user.uid,
+          displayName: myName.slice(0, 120),
+          username: myHandle,
+          role: 'owner',
+          memberIds: [user.uid],
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        await batch.commit();
+        householdIdByName.set(key, householdId);
+        kitHouseholdIds.push(householdId);
+        count += 1;
+      } catch {
+        // One household failing does not stop the rest of the kit.
+      }
+    }
+
+    // The Contacts sheet: one entry per kit person who is not
+    // already on it, written exactly as the Contacts form writes
+    // — the importer owns the record, the family is its reach.
+    const existingNames = new Set(
+      directoryEntries.map((d) => d.displayName.trim().toLowerCase())
+    );
+    const entryHouseholdId =
+      activeHousehold?.householdId || kitHouseholdIds[0] || '';
+    for (const kd of Array.isArray(snapshot.directoryEntries)
+      ? snapshot.directoryEntries
+      : []) {
+      const displayName = String(kd.displayName || '').trim().slice(0, 120);
+      if (!displayName || existingNames.has(displayName.toLowerCase())) continue;
+      existingNames.add(displayName.toLowerCase());
+      try {
+        const id = createSafeId('dir');
+        await setDoc(doc(db, 'directoryEntries', id), {
+          userId: user.uid,
+          householdId: entryHouseholdId,
+          memberIds: familyMemberIds.slice(0, 100),
+          scope: familyId ? 'family' : 'household',
+          familyId: familyId || '',
+          circleIds: [],
+          displayName,
+          birthday: String(kd.birthday || '').slice(0, 10),
+          anniversary: String(kd.anniversary || '').slice(0, 10),
+          anniversaryLabel: String(kd.anniversaryLabel || '').slice(0, 80),
+          physicalAddress: String(kd.physicalAddress || '').slice(0, 400),
+          billingAddress: String(kd.billingAddress || '').slice(0, 400),
+          phones: Array.isArray(kd.phones) ? kd.phones.map(String).slice(0, 6) : [],
+          emails: Array.isArray(kd.emails) ? kd.emails.map(String).slice(0, 6) : [],
+          notes: String(kd.notes || '').slice(0, 500),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        count += 1;
+      } catch {
+        // Same as above — one entry failing stops nothing else.
+      }
+    }
+
+    return count;
+  }
+
   async function handleRestoreSnapshot(
     snapshot: WorkspaceBackupSnapshot
   ): Promise<{ importedCount: number }> {
     if (!user) return { importedCount: 0 };
     let importedCount = 0;
+
+    // R5: a starter kit lands its structure first — family,
+    // households, Contacts — re-rooted to the importer. The
+    // ordinary restore loops below then add any content records;
+    // they skip the kit structure records themselves, whose
+    // placeholder owner is nobody on this desk.
+    if (snapshot.starterKit) {
+      importedCount += await importStarterKit(snapshot);
+    }
 
     const existingTaskKeys = new Set(
       tasks.map((t) => `${t.title.trim().toLowerCase()}|${t.dueDate}`)

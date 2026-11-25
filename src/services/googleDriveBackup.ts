@@ -32,6 +32,12 @@ export interface DriveBackupFile {
 export interface WorkspaceBackupSnapshot {
   version: 1;
   exportedAtIso: string;
+  // R5 (Jason, 2026-11-24): a starter kit is a snapshot authored
+  // ahead of the family — roster, households, and the Contacts
+  // sheet — under a placeholder owner. Restoring one re-roots
+  // everything to the person importing it (see importStarterKit
+  // in App.tsx) instead of restoring only the owner's own records.
+  starterKit?: boolean;
   tasks: Array<Omit<ScheduleTask, 'createdAt' | 'updatedAt'>>;
   documents: Array<Omit<ScannedDocument, 'createdAt' | 'updatedAt'>>;
   propertyEntries: Array<Omit<PropertyEntry, 'createdAt' | 'updatedAt'>>;
